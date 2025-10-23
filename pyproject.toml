@@ -1,0 +1,20 @@
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ODEsolvers"
+
+version = "0.0.0"
+
+description = "Collection of ODE solvers"
+
+readme = "README.md"
+
+requires-python = ">=3.9"
+
+license = "MIT"
+
+authors = [{ name = "L. Kellerer", email = "l.kellerer1@gmx.de" }]
+
+dependencies = ["numpy", "scipy"]
+

@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 from matplotlib import pyplot as plt
-from solvers.solvers import *
+from solvers.simple import *
 from solvers.Extrapolation_Scheme import SEULEX
 import logging
 
@@ -33,4 +33,3 @@ fig, ax = plt.subplots()
 # ax.plot(result[0], result[1])
 ax.plot(time, result[:, 0], marker="o")
 plt.show()
-

@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import os
 
-from solvers.solvers import *
+from solvers.simple import *
 from solvers.Extrapolation_Scheme import SEULEX
 
 # ODE problem
