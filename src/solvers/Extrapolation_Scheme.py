@@ -61,7 +61,7 @@ class Extrapolation_Solver(ABC):
         # self.base_order = base_order
         self.step_seq = step_seq
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
-        self.coeffs = np.array(
+        self.coeffs_Aitken = np.array(
             [
                 np.array(
                     [
@@ -81,6 +81,11 @@ class Extrapolation_Solver(ABC):
                 for j in range(1, table_size)
             ]
         )
+        self.fevals_per_step = self.step_seq + (
+                1 if self.is_symmetric else 0
+            )  # might not be correct for SODEX
+        total_fevals_per_step = np.cumsum([self.fevals_per_step]*(table_size-1))
+        self.feval_ratios = np.array([total_fevals_per_step[i+1]/total_fevals_per_step[i] for i in range(len(total_fevals_per_step)-1)])
 
     @abstractmethod
     def base_scheme(
@@ -108,7 +113,7 @@ class Extrapolation_Solver(ABC):
             T_coarselow = T_table_k[col]
             T_finelow = T_extrap
             T_extrap = (
-                T_finelow + (T_finelow - T_coarselow) * self.coeffs[n_columns, col]
+                T_finelow + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns, col]
             )
             T_table_k[col] = T_finelow
         T_table_k[n_columns] = T_extrap
@@ -153,20 +158,30 @@ class Extrapolation_Solver(ABC):
             err_prev = err
             err = np.abs(T_table_k[iterator_table - 1] - T_table_k[iterator_table])
 
-            step_info["n_feval"] += self.step_seq[iterator_table] + (
-                1 if self.is_symmetric else 0
-            )  # might not be correct for SODEX
+            step_info["n_feval"] += self.fevals_per_step[iterator_table]
             step_info["n_lu"] += 1
             logger.debug(
                 f"Stage reached: {iterator_table}, error: {err}"
             )  # might be wrong for symmetric methods
 
             # exit conditions
-            tol = self.atol + self.rtol * np.maximum(np.abs(U0), np.abs(T_table_k[iterator_table]))
-            if np.linalg.norm(err/tol, ord=np.inf) < 1.: # alternative: norm_hairer
-                step_info["exit_status"] = "Success: Tolerance reached"
-                logger.debug("Success")
-                break
+            if(iterator_table == iterator_target-1) # TODO: greater equal?, why can i not check this earlier?
+                tol = self.atol + self.rtol * np.maximum(np.abs(U0), np.abs(T_table_k[iterator_table]))
+                err_ratio = np.linalg.norm(err/tol, ord=np.inf) # alternative: norm_hairer
+                step_opt, step_opt_prev, work_per_step, work_per_step_prev
+                if(err_ratio < 1): # a) Convergence in line k − 1
+                    if work_per_step < 0.9*work_per_step_prev:
+                        iterator_target = iterator_target
+                        step = step_opt_prev*self.feval_ratio[k]
+                    else:
+                    iterator_target =iterator_table
+                    step = 
+                    step_info["exit_status"] = "Success"
+                    logger.debug("Success: Tolerance reached in line k-1")
+                    break
+            else: # b) Convergence monitor: do we expect conergence in later steps?
+
+
             elif iterator_table >= 2 and np.any(
                 err >= err_prev
             ):  # Hairer & Wanner overflow remedy a)
@@ -248,6 +263,7 @@ class Extrapolation_Solver(ABC):
         # TODO: check for step rejection
         # TODO: set stepfac_max after step rejection
         # TODO: PI controller, Gustafsson acceleration
+        # TODO: try to keep steady?
         if (current_time + step > t_max):
             current_time: float = t_max
 
@@ -273,6 +289,91 @@ class Extrapolation_Solver(ABC):
 
         return min(100*h0, h1)
 
+class EULEX(Extrapolation_Solver):
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        mass_matrix: NDArray[np.floating] | None = None,
+        atol: float = 1e-11,
+        rtol: float = 1e-5,
+        table_size: int = 8,
+    ):
+        step_seq = np.array(range(1, table_size + 1))  # Harmonic
+
+        super().__init__(
+            step_seq=step_seq,
+            is_symmetric=False,
+            base_order=1,
+            ode_fun=ode_fun,
+            num_odes=num_odes,
+            jac_fun=jac_fun,
+            atol=atol,
+            rtol=rtol,
+            table_size=table_size,
+        )
+
+    def base_scheme(
+        self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
+    ) -> NDArray[np.floating]:
+        r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
+        delta_t = (t_max - t0) / n_steps
+
+        U_n = U0
+        t_n = t0
+        for _ in range(n_steps):
+            delta_U = self.inv_mass_matrix*(delta_t * self.ode_fun(t_n, U_n))
+            U_n = U_n + delta_U
+            t_n += delta_t
+        return U_n
+
+class ODEX(Extrapolation_Solver):
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        mass_matrix: NDArray[np.floating] | None = None,
+        atol: float = 1e-11,
+        rtol: float = 1e-5,
+        table_size: int = 8,
+    ):
+        step_seq = np.array(range(1, table_size + 1))  # Harmonic
+
+        super().__init__(
+            step_seq=step_seq,
+            is_symmetric=False,
+            base_order=1,
+            ode_fun=ode_fun,
+            num_odes=num_odes,
+            jac_fun=jac_fun,
+            atol=atol,
+            rtol=rtol,
+            table_size=table_size,
+        )
+
+    def base_scheme(
+        self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
+    ) -> NDArray[np.floating]:
+        r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
+        delta_t = (t_max - t0) / n_steps
+
+        # t_n = t0
+        U_nprev = U0
+        U_n = U0 + delta_t*self.inv_mass_matrix*(delta_t * self.ode_fun(t0, U0)) # start with an Euler step
+        t_n = t0 + delta_t
+        for _ in range(1, n_steps):
+            delta_U = self.inv_mass_matrix*(2*delta_t * self.ode_fun(t_n, U_n))
+            U_temp = U_n
+            U_n = U_nprev + delta_U
+            t_n += delta_t
+            U_nprev = U_temp
+        return U_n
 
 class SEULEX(Extrapolation_Solver):
     def __init__(
@@ -311,8 +412,8 @@ class SEULEX(Extrapolation_Solver):
         delta_t = (t_max - t0) / n_steps
         lu, piv = lu_factor(self.mass_matrix - delta_t * jac0)
 
-        t_n = t0
         U_n = U0
+        t_n = t0
         for _ in range(n_steps):
             rhs = delta_t * self.ode_fun(t_n, U_n)
             delta_U = lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
@@ -361,12 +462,12 @@ class SODEX(Extrapolation_Solver):
         t_n = t0 + delta_t
 
         # continue with linearly implicit midpoint
-        for _ in range(n_steps - 1):
+        for _ in range(1,n_steps):
             rhs = delta_t * self.ode_fun(t_n, U_n) - (U_n - U_nprev)
-            delta_U = 2 * np.linalg.solve(self.mass_matrix - delta_t * jac0, rhs)
+            delta_U = np.linalg.solve(self.mass_matrix - 2 * delta_t * jac0, rhs)
             # rhs = -(self.mass_matrix + delta_t*jac0)*(U_n - U_nprev) + 2*delta_t*self.ode_fun(t_n, U_n)
             # delta_U = np.linalg.solve(self.mass_matrix - delta_t*jac0, rhs)
-            U_nprev = U_n
+            U_nprev = U_n # TODO: i dont think this is right, i need a temp variable
             U_n = U_n + delta_U
             t_n += delta_t
         # the last step, where we do not update U_prev
