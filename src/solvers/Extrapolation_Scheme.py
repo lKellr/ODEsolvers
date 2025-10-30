@@ -347,7 +347,7 @@ class ODEX(Extrapolation_Solver):
 
         super().__init__(
             step_seq=step_seq,
-            is_symmetric=False,
+            is_symmetric=True,
             base_order=1,
             ode_fun=ode_fun,
             num_odes=num_odes,
@@ -364,15 +364,15 @@ class ODEX(Extrapolation_Solver):
         delta_t = (t_max - t0) / n_steps
 
         # t_n = t0
-        U_nprev = U0
+        U_2prev = U0
         U_n = U0 + delta_t*self.inv_mass_matrix*(delta_t * self.ode_fun(t0, U0)) # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
             delta_U = self.inv_mass_matrix*(2*delta_t * self.ode_fun(t_n, U_n))
             U_temp = U_n
-            U_n = U_nprev + delta_U
+            U_n = U_2prev + delta_U
             t_n += delta_t
-            U_nprev = U_temp
+            U_2prev = U_temp
         return U_n
 
 class SEULEX(Extrapolation_Solver):
@@ -419,7 +419,7 @@ class SEULEX(Extrapolation_Solver):
             delta_U = lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
             U_n = U_n + delta_U
             t_n += delta_t
-            # if i == 1 and (delta_U > delta_U_prev):
+            # if i == 1 and (delta_U > delta_U_prev): # TODO: delta_U_prev from Newton iteration!
             #     # TODO: restart
             #     # TODO: thius should be chaked in the base class
         return U_n
@@ -437,7 +437,8 @@ class SODEX(Extrapolation_Solver):
         table_size: int = 8,
     ):
 
-        step_seq = np.array([2, 6, 10, 14, 22, 34, 50])  # note that this starts at 2
+        step_seq = np.array([2, 6, 10, 14, 22, 34, 50])  
+        assert (step_seq%2==0).all(), "Number of steps for SODEX must be even"
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
@@ -453,29 +454,25 @@ class SODEX(Extrapolation_Solver):
         self, U0: NDArray, t0: float, t_max: float, n_steps: int, jac0
     ) -> NDArray:
         delta_t = (t_max - t0) / n_steps
+        lu, piv = lu_factor(self.mass_matrix - delta_t * jac0)
 
         # start with a SEULER step
         rhs = delta_t * self.ode_fun(t0, U0)
         delta_U = np.linalg.solve(self.mass_matrix - delta_t * jac0, rhs)
-        U_nprev = U0
         U_n = U0 + delta_U
         t_n = t0 + delta_t
 
         # continue with linearly implicit midpoint
         for _ in range(1,n_steps):
-            rhs = delta_t * self.ode_fun(t_n, U_n) - (U_n - U_nprev)
-            delta_U = np.linalg.solve(self.mass_matrix - 2 * delta_t * jac0, rhs)
-            # rhs = -(self.mass_matrix + delta_t*jac0)*(U_n - U_nprev) + 2*delta_t*self.ode_fun(t_n, U_n)
-            # delta_U = np.linalg.solve(self.mass_matrix - delta_t*jac0, rhs)
-            U_nprev = U_n # TODO: i dont think this is right, i need a temp variable
+            rhs = 2*delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix*delta_U)
+            delta_U = delta_U + lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
             U_n = U_n + delta_U
-            t_n += delta_t
-        # the last step, where we do not update U_prev
-        rhs = delta_t * self.ode_fun(t_n, U_n) - (U_n - U_nprev)
-        delta_U = 2 * np.linalg.solve(np.identity(self.num_odes) - delta_t * jac0, rhs)
+            t_n += 2*delta_t
+        # Gragg's smoothing, requires one additional step before which we save the previous value of U
+        U_fprev = U_n - delta_U
+        rhs = 2*delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix*delta_U)
+        delta_U = delta_U + lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
         U_n = U_n + delta_U
-
-        # smoothing step
         Sh_n = 0.5 * (U_nprev + U_n)
 
         return Sh_n
