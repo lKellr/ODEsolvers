@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from solvers.simple import *
+from solvers.simple_explicit import *
 from solvers.Extrapolation_Scheme import SEULEX
 import logging
 
