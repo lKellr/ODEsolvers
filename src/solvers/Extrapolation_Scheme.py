@@ -3,12 +3,12 @@ from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 import logging
+from helpers import norm_hairer
 
 from scipy.linalg import lu_factor, lu_solve
 
 logger = logging.getLogger(__name__)
 
-norm_hairer: Callable[[NDArray[np.floating]], float] = lambda x: np.sum(1/x.size*np.abs(x)**2)**0.5
 
 class Extrapolation_Solver(ABC):
     def __init__(
