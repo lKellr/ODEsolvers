@@ -67,6 +67,37 @@ def Midpoint(
     return t, x, info
 
 
+def Heun(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Heuns method for numerical solving of ODEs of the form x_dot=f(t,x). THius is equal to SSPRK2"""
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print("final step not hitting t_max exactly")
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    t = np.linspace(t0, t_max, steps + 1)
+    x = np.zeros((x0.shape[0], steps + 1))
+    t[0] = t0
+    x[:, 0] = x0
+    for i in range(steps):
+        f_i = f(t[i], x[:, i])
+        x[:, i + 1] = x[:, i] + 0.5 * h * (f_i + f(t[i] + h, x[:, i] + h * f_i))
+
+    info["n_feval"] = 2 * steps
+    return t, x, info
+
+
 def AB2(
     f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
