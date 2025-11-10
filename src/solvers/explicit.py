@@ -91,8 +91,8 @@ def Heun(
     t[0] = t0
     x[:, 0] = x0
     for i in range(steps):
-        f_i = f(t[i], x[:, i])
-        x[:, i + 1] = x[:, i] + 0.5 * h * (f_i + f(t[i] + h, x[:, i] + h * f_i))
+        x1 = x[:, i] + h * f(t[i], x[:, i])
+        x[:, i + 1] = 0.5 * x[:, i] + 0.5 * (x1 + h * f(t[i] + h, x1))
 
     info["n_feval"] = 2 * steps
     return t, x, info
@@ -328,9 +328,9 @@ def SSPRK3(
     t[0] = t0
     x[:, 0] = x0
     for i in range(steps):
-        x1 = f(t[i], x[:, i])
-        x2 = 3.0 / 4.0 * x[:, i] + 1.0 / 4.0 * f(t[i] + h, x1)
-        x[:, i + 1] = 1.0 / 3.0 * x[:, i] + 2.0 / 3.0 * f(t[i] + h / 2.0, x2)
+        x1 = x[:, i] + h * f(t[i], x[:, i])
+        x2 = 3.0 / 4.0 * x[:, i] + 1.0 / 4.0 * (x1 + h * f(t[i] + h, x1))
+        x[:, i + 1] = 1.0 / 3.0 * x[:, i] + 2.0 / 3.0 * (x2 + h * f(t[i] + h / 2.0, x2))
 
     info["n_feval"] = 3 * steps
     return t, x, info
@@ -360,10 +360,14 @@ def SSPRK34(
     t[0] = t0
     x[:, 0] = x0
     for i in range(steps):
-        x1 = 1.0 / 2.0 * x[:, i + 1] + 1.0 / 2.0 * f(t[i], x[:, i])
-        x2 = 1.0 / 2.0 * x1 + 1.0 / 2.0 * f(t[i] + h / 2.0, x1)
-        x3 = 2.0 / 3.0 * x[:, i + 1] + 1.0 / 6.0 * x2 + 1.0 / 6.0 * f(t[i] + h, x2)
-        x[:, i + 1] = 1.0 / 2.0 * x3 + 1.0 / 2.0 * f(t[i] + h / 2.0, x3)
+        x1 = 1.0 / 2.0 * x[:, i] + 1.0 / 2.0 * (x[:, i] + h * f(t[i], x[:, i]))
+        x2 = 1.0 / 2.0 * x1 + 1.0 / 2.0 * (x1 + h * f(t[i] + h / 2.0, x1))
+        x3 = (
+            2.0 / 3.0 * x[:, i]
+            + 1.0 / 6.0 * x2
+            + 1.0 / 6.0 * (x2 + h * f(t[i] + h, x2))
+        )
+        x[:, i + 1] = 1.0 / 2.0 * x3 + 1.0 / 2.0 * (x3 + h * f(t[i] + h / 2.0, x3))
 
     info["n_feval"] = 4 * steps
     return t, x, info
