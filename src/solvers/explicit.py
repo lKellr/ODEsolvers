@@ -1,6 +1,6 @@
-from typing import Callable
+from typing import Any, Callable
 import numpy as np
-from numpy.typing import NDArray, ANy
+from numpy.typing import NDArray
 
 
 def Euler(
@@ -259,8 +259,71 @@ def RK4(
         k4 = f(t[i] + h, x[:, i] + h * k3)
         x[:, i + 1] = x[:, i] + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
-        info["n_feval"] += 4
+    info["n_feval"] = 4*steps
     return t, x, info
 
 
+def SSPRK3(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Strong stability preserving RK method of order 3, cfl_max <=1"""
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print("final step not hitting t_max exactly")
 
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
+    x = np.zeros((x0.shape[0], steps + 1), dtype=x0.dtype)
+    t[0] = t0
+    x[:, 0] = x0
+    for i in range(steps):
+        x1 = f(t[i], x[:, i])
+        x2 = 3./4.*x[:, i] + 1./4.*f(t[i] + h, x1)
+        x[:, i + 1] = 1./3.*x[:, i] + 2./3.*f(t[i] + h/2., x2)
+
+    info["n_feval"] = 3*steps
+    return t, x, info
+
+def SSPRK34(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Four stage strong stability preserving RK method of order 3, cfl_max <=2"""
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print("final step not hitting t_max exactly")
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
+    x = np.zeros((x0.shape[0], steps + 1), dtype=x0.dtype)
+    t[0] = t0
+    x[:, 0] = x0
+    for i in range(steps):
+        x1 = 1./2.*x[:, i + 1] + 1./2.*f(t[i], x[:, i])
+        x2 = 1./2.*x1 + 1./2.*f(t[i] + h/2., x1)
+        x3 = 2./3.*x[:, i + 1] + 1./6.*x2 + 1./6.*f(t[i] + h, x2)
+        x[:, i + 1] = 1./2.*x3 + 1./2.*f(t[i] + h/2., x3)
+
+    info["n_feval"] = 4*steps
+    return t, x, info
+
+# TODO: add Radau, TSRK, RK853
