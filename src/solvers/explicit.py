@@ -24,7 +24,7 @@ def Euler(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         x[i + 1] = x[i] + h * f(t[i], x[i])
@@ -53,7 +53,7 @@ def Midpoint(
 
     t = np.linspace(t0, t_max, steps + 1)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         x[i + 1] = x[i] + h * f(
@@ -86,7 +86,7 @@ def Heun(
 
     t = np.linspace(t0, t_max, steps + 1)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         x1 = x[i] + h * f(t[i], x[i])
@@ -285,7 +285,7 @@ def RK4(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         k1 = f(t[i], x[i])
@@ -319,7 +319,7 @@ def SSPRK3(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         x1 = x[i] + h * f(t[i], x[i])
@@ -351,7 +351,7 @@ def SSPRK34(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
+
     x[0] = x0
     for i in range(steps):
         x1 = 1.0 / 2.0 * x[i] + 1.0 / 2.0 * (x[i] + h * f(t[i], x[i]))

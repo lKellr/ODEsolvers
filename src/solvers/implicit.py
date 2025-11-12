@@ -26,9 +26,8 @@ def Backwards_Euler(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[0] = t0
-    x[0] = x0
 
+    x[0] = x0
     for i in range(steps):
         f_imp = lambda x_next: x_next - x[i] - h * f(t[i + 1], x_next)
         # x[ i + 1 : i + 2] = solver(
@@ -40,10 +39,8 @@ def Backwards_Euler(
             print("solver did not converge")
             break
         info["n_feval"] += sol.nfev
-        info["n_jaceval"] += sol.njev
-        info["n_lu"] += sol.nfev  # TODO: is this correct?
-        print(sol.keys())
-        exit()  # TODO: wip
+        # info["n_jaceval"] += sol.njev # TODO:
+        # # info["n_lu"] += sol.nfev
 
     return t, x, info
 
@@ -59,7 +56,9 @@ def BDF2(
     """Backward differantiation Formula of order 2 for stiff systems.
     Starting values generated with backwards Euler method
     System of Equations solved by solver(f==0, a, b, tol)"""
-    steps = np.ceil((t_max - t0) / h) + 1
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if t0 + steps * h != t_max:
+        print("final step not hitting t_max exactly")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -70,10 +69,10 @@ def BDF2(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    t[:2], x[:2], inf_starter = Backwards_Euler(f, x0, t0 + h, h, t0, solver, solvertol)
+    t[:2], x[:2], inf_starter = Backwards_Euler(f, x0, t0 + h, h, t0, solvertol)
     info = inf_starter
 
-    for i in range(steps - 1):
+    for i in range(1, steps):
         f_imp = (
             lambda x_next: x_next
             - 4 / 3 * x[i]
@@ -86,10 +85,8 @@ def BDF2(
             print("solver did not converge")
             break
         info["n_feval"] += sol.nfev
-        info["n_jaceval"] += sol.njev
-        info["n_lu"] += sol.nfev  # TODO: is this correct?
-        print(sol.keys())
-        exit()  # TODO: wip
+        # info["n_jaceval"] += sol.njev # TODO:
+        # info["n_lu"] += sol.nfev
     return t, x, info
 
 
@@ -103,7 +100,9 @@ def TRBDF2(
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
     """Combination of the trapezoidal method with BDF2 to get a DIRK scheme,
     see "Analysis and implementation of TR-BDF2", Hosea and Shampine 1996"""
-    steps = np.ceil((t_max - t0) / h) + 1
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if t0 + steps * h != t_max:
+        print("final step not hitting t_max exactly")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -115,26 +114,33 @@ def TRBDF2(
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
 
+    x[0] = x0
     for i in range(steps):
         f_imp1 = lambda x_halftrapz: x_halftrapz - (
-            x[i] + 0.25 * h * (f(t[i + 1], x[i]) + f(t[i + 1], x_halftrapz))
+            x[i] + 0.25 * h * (f(t[i], x[i]) + f(t[i] + 0.5 * h, x_halftrapz))
         )
-        sol1 = root(f_imp, x0=x[i], tol=solvertol, method="hybr")
+        sol1 = root(f_imp1, x0=x[i], tol=solvertol, method="hybr")
         x_halftrapz = sol1.x
+        if not sol1.success:
+            print("solver did not converge")
+            break
 
         f_imp2 = lambda x_next: x_next - 1.0 / 3.0 * (
-            4 * x_halftrapz - x[i] + h * f(t[i + 1], x_next)
+            4 * x_halftrapz
+            - x[i]
+            + h
+            * f(
+                t[i + 1], x_next
+            )  # Note that the step is here half of what it is in the normal BDF2 scheme!
         )
-        sol2 = root(f_imp, x0=x_halftrapz, tol=solvertol, method="hybr")
-        x[i + 1] = sol.x
-        if not sol.success:
+        sol2 = root(f_imp2, x0=x_halftrapz, tol=solvertol, method="hybr")
+        x[i + 1] = sol2.x
+        if not sol2.success:
             print("solver did not converge")
             break
         info["n_feval"] += sol1.nfev + sol2.nfev
-        info["n_jaceval"] += sol1.njev + sol2.njev
-        info["n_lu"] += sol1.nfev + sol2.nfev  # TODO: is this correct?
-        print(sol.keys())
-        exit()  # TODO: wip
+        # info["n_jaceval"] += sol1.njev + sol2.njev
+        # info["n_lu"] += sol1.nfev + sol2.nfev  # TODO: is this correct?
     return t, x, info
 
 
@@ -149,7 +155,9 @@ def BDF3(
     """Backward differantiation Formula of order 3 for stiff systems.
     Starting values generated with backwards Euler method and BDF2
     System of Equations solved by solver(f==0, a, b, tol)"""
-    steps = np.ceil((t_max - t0) / h) + 1
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if t0 + steps * h != t_max:
+        print("final step not hitting t_max exactly")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -163,21 +171,21 @@ def BDF3(
     t[:3], x[:3], inf_starter = BDF2(f, x0, t0 + 2 * h, h, t0, solvertol)
     info = inf_starter
 
-    for i in range(steps - 1):
+    for i in range(2, steps):
         f_imp = (
-            lambda x_next: x_next
-            - 18 / 11 * x[i]
-            + 9 / 11 * x[i - 1]
-            - 2 / 11 * x[i]
-            - 6 / 11 * h * f(t[i + 1], x_next)
+            lambda x_next: 11 * x_next
+            - 18 * x[i]
+            + 9 * x[i - 1]
+            - 2 * x[i - 2]
+            - 6 * h * f(t[i + 1], x_next)
         )
+        sol = root(f_imp, x0=x[i], tol=solvertol, method="hybr")
+
         x[i + 1] = sol.x
         if not sol.success:
             print("solver did not converge")
             break
         info["n_feval"] += sol.nfev
-        info["n_jaceval"] += sol.njev
-        info["n_lu"] += sol.nfev  # TODO: is this correct?
-        print(sol.keys())
-        exit()  # TODO: wip
+        # info["n_jaceval"] += sol.njev # TODO:
+        # info["n_lu"] += sol.nfev
     return t, x, info
