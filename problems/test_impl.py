@@ -1,11 +1,24 @@
+from numpy._typing._array_like import NDArray
+
+
+from typing import Any, Callable
+
+
 import os
 import numpy as np
 from matplotlib import pyplot as plt
 from solvers.embedded import BS23
 from solvers.implicit import *
 import logging
+from numpy.typing import NDArray
+
+from solvers.root_finding import Newton
 
 logging.basicConfig(level=logging.DEBUG)
+# logger_ode = logging.getLogger("solvers.root_finding")
+# logger_ode.setLevel(logging.INFO)
+logger_mpb = logging.getLogger("matplotlib")
+logger_mpb.setLevel(logging.INFO)
 
 ## Duffing oscillator
 alpha = -1.0
@@ -15,8 +28,14 @@ delta = 0.02
 omega = 1.0
 
 
-x_dot = lambda t, x: np.array(
-    [x[1], gamma * np.cos(omega * t) - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3)]
+x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
+    lambda t, x: np.array(
+        [
+            x[1],
+            gamma * np.cos(omega * t)
+            - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3),
+        ]
+    )
 )
 
 t_max = 8 * np.pi
@@ -39,6 +58,7 @@ results = dict()
 h = 1e-2
 results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 results["BackwardsEuler"] = Backwards_Euler(x_dot, x0, t_max, h)
+results["BackwardsEulerNewton"] = Backwards_Euler(x_dot, x0, t_max, h, nl_solver=Newton)
 results["BDF2"] = BDF2(x_dot, x0, t_max, h)
 results["TR-BDF2"] = TRBDF2(x_dot, x0, t_max, h)
 results["BDF3"] = BDF3(x_dot, x0, t_max, h)
@@ -76,10 +96,10 @@ axes[1].set_title("Work-Precision II")
 axes[1].set_xlabel("jacobian evaluations")
 axes[1].set_ylabel("error")
 axes[1].set_yscale("log")
-axes[1].set_title("Work-Precision III")
-axes[1].set_xlabel("LU decompositions")
-axes[1].set_ylabel("error")
-axes[1].set_yscale("log")
+axes[2].set_title("Work-Precision III")
+axes[2].set_xlabel("LU decompositions")
+axes[2].set_ylabel("error")
+axes[2].set_yscale("log")
 
 for scheme_name, (time, result, solve_info) in results.items():
     axes[0].plot(

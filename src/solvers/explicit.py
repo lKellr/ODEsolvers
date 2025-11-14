@@ -13,7 +13,7 @@ def Euler(
     """Eulers method for numerical solving of ODEs"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if t0 + steps * h != t_max:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -42,7 +42,7 @@ def Midpoint(
     """Explicit Midpoint method for numerical solving of ODEs of the form x_dot=f(t,x)"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -75,7 +75,7 @@ def Heun(
     """Heuns method for numerical solving of ODEs of the form x_dot=f(t,x). THius is equal to SSPRK2"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -106,7 +106,7 @@ def AB2(
     """Adams Bashforth of order 2, started by Midpoint method"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -140,7 +140,7 @@ def AB3(
     """Adams Bashforth of order 3, first values calculated with Midpoint and AB2"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -178,7 +178,7 @@ def PECE(
     """PECE Method using AB3, AM4, starting with Midpoint and AB2"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -225,7 +225,7 @@ def PECE_(
     """PECE Method using AB3, AM4, starting with Midpoint and AB2, iterates until convergence with tolerance tol is met"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -274,7 +274,7 @@ def RK4(
     """Classical Runge-Kutta Method, order 4"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -308,7 +308,7 @@ def SSPRK3(
     """Strong stability preserving RK method of order 3, cfl_max <=1"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
@@ -340,7 +340,7 @@ def SSPRK34(
     """Four stage strong stability preserving RK method of order 3, cfl_max <=2"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
-        print("final step not hitting t_max exactly")
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     info: dict[str, Any] = dict(
         n_feval=0,
