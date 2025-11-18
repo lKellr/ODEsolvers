@@ -1,8 +1,8 @@
 from typing import Callable, Any
 import numpy as np
 from numpy.typing import NDArray
-from solvers.helpers import root_wrapped
-from solvers.root_finding import Newton
+from modules.helpers import root_wrapped
+from modules.root_finding import Newton
 
 
 def Backwards_Euler(

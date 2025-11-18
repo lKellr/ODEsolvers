@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import lu_factor, lu_solve
 
-from solvers.helpers import norm_hairer, numerical_jacobian
+from modules.helpers import norm_hairer, numerical_jacobian
 
 logger = logging.getLogger(__name__)
 

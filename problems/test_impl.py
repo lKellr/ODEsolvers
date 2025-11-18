@@ -1,6 +1,9 @@
 from numpy._typing._array_like import NDArray
 
 
+from numpy._typing._array_like import NDArray
+
+
 from typing import Any, Callable
 
 
@@ -12,7 +15,6 @@ from solvers.implicit import *
 import logging
 from numpy.typing import NDArray
 
-from solvers.root_finding import Newton
 
 logging.basicConfig(level=logging.DEBUG)
 # logger_ode = logging.getLogger("solvers.root_finding")
@@ -20,29 +22,37 @@ logging.basicConfig(level=logging.DEBUG)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 
-## Duffing oscillator
-alpha = -1.0
-beta = 1.0
-gamma = 3.0
-delta = 0.02
-omega = 1.0
+# ## Duffing oscillator
+# alpha = -1.0
+# beta = 1.0
+# gamma = 3.0
+# delta = 0.02
+# omega = 1.0
 
 
+# x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
+#     lambda t, x: np.array(
+#         [
+#             x[1],
+#             gamma * np.cos(omega * t)
+#             - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3),
+#         ]
+#     )
+# )
+
+# t_max = 8 * np.pi
+# x0 = np.array([1.0, 0])
+
+# rescaled Van der Pol oscillator
+epsilon = 1e-6
 x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
-    lambda t, x: np.array(
-        [
-            x[1],
-            gamma * np.cos(omega * t)
-            - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3),
-        ]
-    )
+    lambda t, x: np.array([x[1], ((1 - x[0] ** 2) * x[1] - x[0]) / epsilon])
 )
-
-t_max = 8 * np.pi
-x0 = np.array([1.0, 0])
+t_max = 1
+x0: NDArray[np.floating] = np.array([2.0, 0.0])
 
 ref_path = (
-    f"reference_duffing"  # TODO: change if t_max, x0, oscillator parameters are changed
+    f"reference_VdP"  # TODO: change if t_max, x0, oscillator parameters are changed
 )
 if os.path.exists(ref_path + ".npz"):
     dat = np.load(ref_path + ".npz")
@@ -56,9 +66,8 @@ x_analytic = lambda t: np.array(
 
 results = dict()
 h = 1e-2
-results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
+# results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 results["BackwardsEuler"] = Backwards_Euler(x_dot, x0, t_max, h)
-results["BackwardsEulerNewton"] = Backwards_Euler(x_dot, x0, t_max, h, nl_solver=Newton)
 results["BDF2"] = BDF2(x_dot, x0, t_max, h)
 results["TR-BDF2"] = TRBDF2(x_dot, x0, t_max, h)
 results["BDF3"] = BDF3(x_dot, x0, t_max, h)

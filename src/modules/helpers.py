@@ -30,12 +30,3 @@ def numerical_jacobian(x, f, delta):
         shift[j] = delta
         jac[:, j] = (f(x + shift) - f(x)) / delta
     return jac
-
-
-controller_I: Callable[[float, float, float], float] = (
-    lambda err_ratio, err_ratio_last, p: err_ratio ** (-1 / p)
-)
-controller_PI: Callable[[float, float, float, float], float] = (
-    lambda err_ratio, err_ratio_last, alpha, beta: err_ratio ** (-alpha)
-    * err_ratio_last**beta
-)
