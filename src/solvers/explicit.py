@@ -1,6 +1,9 @@
+from numpy._typing._array_like import NDArray
+from numpy import floating
 from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
+from scipy.special import comb
 
 
 def Euler(
@@ -120,11 +123,11 @@ def AB2(
     _, x[:2], inf_starter = Midpoint(f, x0, t0 + h, h, t0)
     info = inf_starter
 
-    f_i = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
+    f_ii = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
     for i in range(1, steps):
-        f_ii = f_i
         f_i = f(t[i], x[i])
         x[i + 1] = x[i] + h / 2 * (3 * f_i - f_ii)
+        f_ii = f_i
 
     info["n_feval"] += steps - 1
     return t, x, info
@@ -154,15 +157,15 @@ def AB3(
     _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[1], x[1])
+    f_ii = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_iii = f(t[0], x[0])
 
     for i in range(2, steps):
-        # t[:,i+1:i+2]=t[:, i:i+1]+h
-        f_iii = f_ii
-        f_ii = f_i
         f_i = f(t[i], x[i])
         x[i + 1] = x[i] + h / 12 * (23 * f_i - 16 * f_ii + 5 * f_iii)
+        f_ii = f_i
+        f_iii = f_ii
+
     info["n_feval"] += steps - 2
     return t, x, info
 
@@ -189,14 +192,12 @@ def PECE(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    # t[:,:3], x[:,:3]=AB2(f, x0, t0+2*h, h, t0)
     _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[1], x[1])
+    f_i = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_ii = f(t[0], x[0])
     for i in range(2, steps):
-        # t[:,i+1:i+2]=t[:, i:i+1]+h
         f_iii = f_ii
         f_ii = f_i
         f_i = f(t[i], x[i])
@@ -213,8 +214,7 @@ def PECE(
     return t, x, info
 
 
-#######################   UNTESTED   ######################
-def PECE_(
+def PECE_tol(
     f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
@@ -239,10 +239,9 @@ def PECE_(
     _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[1], x[1])
+    f_i = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_ii = f(t[0], x[0])
     for i in range(2, steps):
-        # t[:,i+1:i+2]=t[:, i:i+1]+h
         f_iii = f_ii
         f_ii = f_i
         f_i = f(t[i], x[i])
@@ -262,6 +261,127 @@ def PECE_(
 
     info["n_feval"] += steps - 2
     return t, x, info
+
+
+def PEC(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    n_rep: int = 1,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """PEC Method using AB3, AM4, starting with Midpoint and AB2"""
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
+    x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
+    _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
+    info = inf_starter
+
+    f_i = f(t[2], x[2])  # TODO: this has already been evaluated in the starting method
+    f_ii = f(t[1], x[1])
+    f_iii = f(t[0], x[0])
+    for i in range(2, steps):
+
+        x[i + 1] = x[i] + h / 12 * (
+            23 * f_i - 16 * f_ii + 5 * f_iii
+        )  # AB3 predict/evaluate
+        k = x[i] + h / 24 * (19 * f_i - 5 * f_ii + f_iii)
+
+        f_iii = f_ii
+        f_ii = f_i
+
+        for _ in range(n_rep):
+            f_i = f(t[i + 1], x[i + 1])
+            x[i + 1] = k + 9 * h / 24 * f_i  # AM4 correct/evaluate loop
+    info["n_feval"] += n_rep * (steps - 2)
+    return t, x, info
+
+
+def AB_k(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    k: int,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Adams Bashforth of variable order k, maximum implemented is 9"""
+    # This funtion is just a wrapper for tehe real one that also returns the function values
+
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
+
+    t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
+    x, info, f_values = _AB_k(f=f, x0=x0, steps=steps, h=h, k=k, t0=t0)
+    return t, x, info
+
+
+def _AB_k(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    steps: int,
+    h: float,
+    k: int,
+    t0: float = 0.0,
+) -> tuple[NDArray[np.floating], dict[str, Any], NDArray[np.floating]]:
+    """Adams Bashforth of variable order k, this function also returns the computed function values"""
+    assert k <= 9, "highest implemented order is 9"
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    # compute the coefficients
+    gamma = [
+        1.0,
+        1 / 2,
+        5 / 12,
+        3 / 8,
+        251 / 720,
+        95 / 288,
+        19087 / 60480,
+        5257 / 17280,
+        1070017 / 3628800,
+    ]
+    beta = np.array(
+        [
+            (-1) ** (j - 1)
+            * sum([gamma[i] * comb(i, j - 1, exact=True) for i in range(j - 1, k)])
+            for j in range(1, k + 1)
+        ]
+    )
+    # TODO: i am not sure about the (-1)**j term, it is not given in my ource, but results are wrong without it
+
+    x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
+    f_i = np.empty((k, x0.shape[0]), dtype=x0.dtype)
+    if k > 1:
+        x[:k], inf_starter, f_i[: k - 1] = _AB_k(f, x0, k - 1, h, k - 1, t0)
+        info = inf_starter
+    else:
+        x[0] = x0
+
+    for i in range(k - 1, steps):
+        f_i = np.roll(f_i, 1, axis=0)
+        f_i[0] = f(t0 + i * h, x[i])
+        x[i + 1] = x[i] + h * beta @ f_i
+
+    info["n_feval"] += steps - k + 1
+    return x, info, f_i
 
 
 def RK4(
