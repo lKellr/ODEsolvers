@@ -1,5 +1,5 @@
 from numpy._typing._array_like import NDArray
-from numpy import floating
+from numpy import copy, floating
 from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
@@ -162,9 +162,12 @@ def AB3(
 
     for i in range(2, steps):
         f_i = f(t[i], x[i])
-        x[i + 1] = x[i] + h / 12 * (23 * f_i - 16 * f_ii + 5 * f_iii)
-        f_ii = f_i
+        print(
+            f"xi = {x[i]}; f_i= {f_i}, {f_ii}, {f_iii}; xi+1 = {x[i] + h / 12.0 * (23.0 * f_i - 16.0 * f_ii + 5.0 * f_iii)}"
+        )
+        x[i + 1] = x[i] + h / 12.0 * (23.0 * f_i - 16.0 * f_ii + 5.0 * f_iii)
         f_iii = f_ii
+        f_ii = f_i
 
     info["n_feval"] += steps - 2
     return t, x, info
@@ -378,6 +381,10 @@ def _AB_k(
     for i in range(k - 1, steps):
         f_i = np.roll(f_i, 1, axis=0)
         f_i[0] = f(t0 + i * h, x[i])
+        if k > 2:
+            print(
+                f"xi = {x[i]}; f_i= {f_i[0]}, {f_i[1]}, {f_i[2]}; xi+1 = {x[i] + h * beta @ f_i}"
+            )
         x[i + 1] = x[i] + h * beta @ f_i
 
     info["n_feval"] += steps - k + 1
