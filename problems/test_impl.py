@@ -11,6 +11,7 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 # from solvers.embedded import BS23
+from solvers.explicit import AB_k
 from solvers.implicit import *
 import logging
 from numpy.typing import NDArray
@@ -72,8 +73,9 @@ results = dict()
 h = 1e-2
 # results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 results["BackwardsEuler"] = Backwards_Euler(x_dot, x0, t_max, h)
-results["AM2"] = AM_k(x_dot, x0, t_max, h, k=2)
 results["AM3"] = AM_k(x_dot, x0, t_max, h, k=3)
+results["AB3"] = AB_k(x_dot, x0, t_max, h, k=3)
+results["AM5"] = AM_k(x_dot, x0, t_max, h, k=5)
 results["BDF2"] = BDF2(x_dot, x0, t_max, h)
 results["TR-BDF2"] = TRBDF2(x_dot, x0, t_max, h)
 results["BDF3"] = BDF3(x_dot, x0, t_max, h)
@@ -89,14 +91,11 @@ axes[0].plot(t_ref, x_analytic(t_ref)[:, 0], label="analyic", linestyle="--")
 
 for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[0].plot(time, result[:, 0], label=scheme_name,color=cmap(i))
-
-    axes[0].set_ylim(-5, 5)
-
-for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[1].plot(
         time, np.linalg.norm(result - x_analytic(time), axis=1), label=scheme_name,color=cmap(i)
     )
 axes[0].legend(frameon=False)
+axes[1].legend(frameon=False)
 plt.show()
 
 
@@ -123,14 +122,12 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
         label=scheme_name,
         marker="o",
     )
-for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[1].plot(
         solve_info["n_jaceval"],
         np.linalg.norm(result - x_analytic(time)),
         label=scheme_name,
         marker="o",
     )
-for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[2].plot(
         solve_info["n_lu"],
         np.linalg.norm(result - x_analytic(time)),

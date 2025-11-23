@@ -57,11 +57,6 @@ axes[0].plot(t_ref, x_analytic(t_ref)[:, 0], label="analyic", linestyle="--")
 for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[0].plot(time, result[:, 0], label=scheme_name, color=cmap(i))
 
-    axes[0].set_ylim(-5, 5)
-
-plt.gca().set_prop_cycle(plt.rcParams["axes.prop_cycle"])
-
-for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[1].plot(
         time,
         np.linalg.norm(result - x_analytic(time), axis=1),
