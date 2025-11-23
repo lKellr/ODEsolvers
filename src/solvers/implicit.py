@@ -10,7 +10,7 @@ from modules.root_finding import Newton
 
 
 def Backwards_Euler(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -27,7 +27,7 @@ def Backwards_Euler(
     jac_fun: Callable[[NDArray[np.floating]], NDArray[np.floating]] | None = None,
     solvertol: float = 1e-5,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
-    """Backwards Euler Method. System of Equations solved by solver(f==0, a, b, tol)"""
+    """Backwards Euler Method. System of Equations solved by solver(ode_fun==0, a, b, tol)"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if t0 + steps * h != t_max:
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
@@ -44,7 +44,7 @@ def Backwards_Euler(
 
     x[0] = x0
     for i in range(steps):
-        f_imp = lambda x_next: x_next - x[i] - h * f(t[i + 1], x_next)
+        f_imp = lambda x_next: x_next - x[i] - h * ode_fun(t[i + 1], x_next)
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
         if not sol_info["success"]:
             print("solver did not converge")
@@ -57,7 +57,7 @@ def Backwards_Euler(
 
 
 def AM_k(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -81,12 +81,12 @@ def AM_k(
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
-    x, info, f_values = _AM_k(f=f, x0=x0, steps=steps, h=h, k=k, t0=t0)
+    x, info, f_values = _AM_k(ode_fun=ode_fun, x0=x0, steps=steps, h=h, k=k, t0=t0)
     return t, x, info
 
 
 def _AM_k(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     steps: int,
     h: float,
@@ -138,11 +138,11 @@ def _AM_k(
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
     f_i = np.empty((k, x0.shape[0]), dtype=x0.dtype)
     if k > 2:
-        x[:k-1], inf_starter, f_i[: k - 1] = _AM_k(f, x0, k - 2, h, k - 1, t0)
+        x[:k-1], inf_starter, f_i[: k - 1] = _AM_k(ode_fun, x0, k - 2, h, k - 1, t0)
         info = inf_starter
     else: # start with trapezoidal rule
         x[0] = x0
-        f_i[0] = f(t0, x0)
+        f_i[0] = ode_fun(t0, x0)
 
     steps_starter = k - 2 if k>1 else 0
     for i in range(steps_starter, steps):
@@ -154,11 +154,11 @@ def _AM_k(
             f_const = x[i]
 
         def f_imp(x_next): 
-            f_i[0] = f(t0 + (i+1) * h, x_next)
+            f_i[0] = ode_fun(t0 + (i+1) * h, x_next)
             return x_next - (f_const + h * beta[0] * f_i[0])
 
         if jac_fun is None: # Jacobian without setting f_i[0] # TODO: this is probably not efficient
-            jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: f(t0 + (i+1) * h, x), 1e-8)
+            jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: ode_fun(t0 + (i+1) * h, x), 1e-8)
         
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
 
@@ -172,7 +172,7 @@ def _AM_k(
 
 
 def BDF2(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -191,7 +191,7 @@ def BDF2(
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
     """Backward differantiation Formula of order 2 for stiff systems.
     Starting values generated with backwards Euler method
-    System of Equations solved by solver(f==0, a, b, tol)"""
+    System of Equations solved by solver(ode_fun==0, a, b, tol)"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if t0 + steps * h != t_max:
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
@@ -206,7 +206,7 @@ def BDF2(
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
     t[:2], x[:2], inf_starter = Backwards_Euler(
-        f=f, x0=x0, t_max=t0 + h, h=h, t0=t0, nl_solver=nl_solver, solvertol=solvertol
+        ode_fun=ode_fun, x0=x0, t_max=t0 + h, h=h, t0=t0, nl_solver=nl_solver, solvertol=solvertol
     )
     info = inf_starter
 
@@ -215,7 +215,7 @@ def BDF2(
             lambda x_next: x_next
             - 4 / 3 * x[i]
             + 1 / 3 * x[i - 1]
-            - 2 / 3 * h * f(t[i + 1], x_next)
+            - 2 / 3 * h * ode_fun(t[i + 1], x_next)
         )
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
         if not sol_info["success"]:
@@ -228,7 +228,7 @@ def BDF2(
 
 
 def TRBDF2(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -264,7 +264,7 @@ def TRBDF2(
     x[0] = x0
     for i in range(steps):
         f_imp1 = lambda x_halftrapz: x_halftrapz - (
-            x[i] + 0.25 * h * (f(t[i], x[i]) + f(t[i] + 0.5 * h, x_halftrapz))
+            x[i] + 0.25 * h * (ode_fun(t[i], x[i]) + ode_fun(t[i] + 0.5 * h, x_halftrapz))
         )
         x_halftrapz, sol1_info = nl_solver(
             f_imp1, x0=x[i], tol=solvertol, jac_fun=jac_fun
@@ -280,7 +280,7 @@ def TRBDF2(
             4 * x_halftrapz
             - x[i]
             + h
-            * f(
+            * ode_fun(
                 t[i + 1], x_next
             )  # Note that the step is here half of what it is in the normal BDF2 scheme!
         )
@@ -297,7 +297,7 @@ def TRBDF2(
 
 
 def BDF3(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -316,7 +316,7 @@ def BDF3(
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
     """Backward differantiation Formula of order 3 for stiff systems.
     Starting values generated with backwards Euler method and BDF2
-    System of Equations solved by solver(f==0, a, b, tol)"""
+    System of Equations solved by solver(ode_fun==0, a, b, tol)"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if t0 + steps * h != t_max:
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
@@ -331,7 +331,7 @@ def BDF3(
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
     t[:3], x[:3], inf_starter = BDF2(
-        f=f,
+        ode_fun=ode_fun,
         x0=x0,
         t_max=t0 + 2 * h,
         h=h,
@@ -348,7 +348,7 @@ def BDF3(
             - 18 * x[i]
             + 9 * x[i - 1]
             - 2 * x[i - 2]
-            - 6 * h * f(t[i + 1], x_next)
+            - 6 * h * ode_fun(t[i + 1], x_next)
         )
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
 
@@ -362,7 +362,7 @@ def BDF3(
 
 
 def RADAU5(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -394,7 +394,7 @@ def RADAU5(
         lu, piv = lu_factor(mass_matrix - h * A * jac)  # TODO: make A explicit
         # Newton iterations
         while True:
-            rhs = -Z + h * (A * I) * f(t[i] + c * h, x[i] + Z)
+            rhs = -Z + h * (A * I) * ode_fun(t[i] + c * h, x[i] + Z)
             delta_Z = lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
             Z += delta_Ts
 

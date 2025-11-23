@@ -7,7 +7,7 @@ from scipy.special import comb
 
 
 def Euler(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -30,19 +30,19 @@ def Euler(
 
     x[0] = x0
     for i in range(steps):
-        x[i + 1] = x[i] + h * f(t[i], x[i])
+        x[i + 1] = x[i] + h * ode_fun(t[i], x[i])
     info["n_feval"] = steps
     return t, x, info
 
 
 def Midpoint(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
     t0: float = 0.0,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
-    """Explicit Midpoint method for numerical solving of ODEs of the form x_dot=f(t,x)"""
+    """Explicit Midpoint method for numerical solving of ODEs of the form x_dot=ode_fun(t,x)"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
@@ -59,9 +59,9 @@ def Midpoint(
 
     x[0] = x0
     for i in range(steps):
-        x[i + 1] = x[i] + h * f(
+        x[i + 1] = x[i] + h * ode_fun(
             t[i] + 0.5 * h,
-            x[i] + 0.5 * h * f(t[i], x[i]),
+            x[i] + 0.5 * h * ode_fun(t[i], x[i]),
         )
 
     info["n_feval"] = 2 * steps
@@ -69,13 +69,13 @@ def Midpoint(
 
 
 def Heun(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
     t0: float = 0.0,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
-    """Heuns method for numerical solving of ODEs of the form x_dot=f(t,x). THius is equal to SSPRK2"""
+    """Heuns method for numerical solving of ODEs of the form x_dot=ode_fun(t,x). THius is equal to SSPRK2"""
     steps = np.ceil((t_max - t0) / h).astype(int)
     if steps * h / (t_max - t0) - 1.0 > 1e-4:
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
@@ -92,15 +92,15 @@ def Heun(
 
     x[0] = x0
     for i in range(steps):
-        x1 = x[i] + h * f(t[i], x[i])
-        x[i + 1] = 0.5 * x[i] + 0.5 * (x1 + h * f(t[i] + h, x1))
+        x1 = x[i] + h * ode_fun(t[i], x[i])
+        x[i + 1] = 0.5 * x[i] + 0.5 * (x1 + h * ode_fun(t[i] + h, x1))
 
     info["n_feval"] = 2 * steps
     return t, x, info
 
 
 def AB2(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -120,12 +120,12 @@ def AB2(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    _, x[:2], inf_starter = Midpoint(f, x0, t0 + h, h, t0)
+    _, x[:2], inf_starter = Midpoint(ode_fun, x0, t0 + h, h, t0)
     info = inf_starter
 
-    f_ii = f(t[0], x[0])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(t[0], x[0])  # TODO: this has already been evaluated in the starting method
     for i in range(1, steps):
-        f_i = f(t[i], x[i])
+        f_i = ode_fun(t[i], x[i])
         x[i + 1] = x[i] + h / 2 * (3 * f_i - f_ii)
         f_ii = f_i
 
@@ -134,7 +134,7 @@ def AB2(
 
 
 def AB3(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -154,14 +154,14 @@ def AB3(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
+    _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_ii = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
-    f_iii = f(t[0], x[0])
+    f_ii = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_iii = ode_fun(t[0], x[0])
 
     for i in range(2, steps):
-        f_i = f(t[i], x[i])
+        f_i = ode_fun(t[i], x[i])
         print(
             f"xi = {x[i]}; f_i= {f_i}, {f_ii}, {f_iii}; xi+1 = {x[i] + h / 12.0 * (23.0 * f_i - 16.0 * f_ii + 5.0 * f_iii)}"
         )
@@ -174,7 +174,7 @@ def AB3(
 
 
 def PECE(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -195,22 +195,22 @@ def PECE(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
+    _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[0], x[0])
+    f_i = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(t[0], x[0])
     for i in range(2, steps):
         f_iii = f_ii
         f_ii = f_i
-        f_i = f(t[i], x[i])
+        f_i = ode_fun(t[i], x[i])
 
         x[i + 1] = x[i] + h / 12 * (
             23 * f_i - 16 * f_ii + 5 * f_iii
         )  # AB3 predict/evaluate
         k = x[i] + h / 24 * (19 * f_i - 5 * f_ii + f_iii)
         for _ in range(n_rep):
-            x[i + 1] = k + 9 * h / 24 * f(
+            x[i + 1] = k + 9 * h / 24 * ode_fun(
                 t[i + 1], x[i + 1]
             )  # AM4 correct/evaluate loop
     info["n_feval"] += (1 + n_rep) * (steps - 2)
@@ -218,7 +218,7 @@ def PECE(
 
 
 def PECE_tol(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -239,15 +239,15 @@ def PECE_tol(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
+    _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[1], x[1])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[0], x[0])
+    f_i = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(t[0], x[0])
     for i in range(2, steps):
         f_iii = f_ii
         f_ii = f_i
-        f_i = f(t[i], x[i])
+        f_i = ode_fun(t[i], x[i])
 
         x[i + 1] = x[i] + h / 12 * (
             23 * f_i - 16 * f_ii + 5 * f_iii
@@ -257,7 +257,7 @@ def PECE_tol(
         last = np.inf
         while np.linalg.norm(x[i + 1] - last, ord=np.inf) > tol:
             last = x[i + 1]
-            x[i + 1] = k + 9 * h / 24 * f(
+            x[i + 1] = k + 9 * h / 24 * ode_fun(
                 t[i + 1], x[i + 1]
             )  # AM4 correct/evaluate loop
             info["n_feval"] += 1
@@ -267,7 +267,7 @@ def PECE_tol(
 
 
 def PEC(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -288,12 +288,12 @@ def PEC(
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
-    _, x[:3], inf_starter = AB2(f, x0, t0 + 2 * h, h, t0)
+    _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = f(t[2], x[2])  # TODO: this has already been evaluated in the starting method
-    f_ii = f(t[1], x[1])
-    f_iii = f(t[0], x[0])
+    f_i = ode_fun(t[2], x[2])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(t[1], x[1])
+    f_iii = ode_fun(t[0], x[0])
     for i in range(2, steps):
 
         x[i + 1] = x[i] + h / 12 * (
@@ -305,14 +305,14 @@ def PEC(
         f_ii = f_i
 
         for _ in range(n_rep):
-            f_i = f(t[i + 1], x[i + 1])
+            f_i = ode_fun(t[i + 1], x[i + 1])
             x[i + 1] = k + 9 * h / 24 * f_i  # AM4 correct/evaluate loop
     info["n_feval"] += n_rep * (steps - 2)
     return t, x, info
 
 
 def AB_k(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -327,12 +327,12 @@ def AB_k(
         print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
 
     t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
-    x, info, f_values = _AB_k(f=f, x0=x0, steps=steps, h=h, k=k, t0=t0)
+    x, info, f_values = _AB_k(ode_fun=ode_fun, x0=x0, steps=steps, h=h, k=k, t0=t0)
     return t, x, info
 
 
 def _AB_k(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     steps: int,
     h: float,
@@ -373,14 +373,14 @@ def _AB_k(
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
     f_i = np.empty((k, x0.shape[0]), dtype=x0.dtype)
     if k > 1:
-        x[:k], inf_starter, f_i[: k - 1] = _AB_k(f, x0, k - 1, h, k - 1, t0)
+        x[:k], inf_starter, f_i[: k - 1] = _AB_k(ode_fun, x0, k - 1, h, k - 1, t0)
         info = inf_starter
     else:
         x[0] = x0
 
     for i in range(k - 1, steps):
         f_i = np.roll(f_i, 1, axis=0)
-        f_i[0] = f(t0 + i * h, x[i])
+        f_i[0] = ode_fun(t0 + i * h, x[i])
         x[i + 1] = x[i] + h * beta @ f_i
 
     info["n_feval"] += steps - k + 1
@@ -388,7 +388,7 @@ def _AB_k(
 
 
 def RK4(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -411,10 +411,10 @@ def RK4(
 
     x[0] = x0
     for i in range(steps):
-        k1 = f(t[i], x[i])
-        k2 = f(t[i] + 0.5 * h, x[i] + 0.5 * h * k1)
-        k3 = f(t[i] + 0.5 * h, x[i] + 0.5 * h * k2)
-        k4 = f(t[i] + h, x[i] + h * k3)
+        k1 = ode_fun(t[i], x[i])
+        k2 = ode_fun(t[i] + 0.5 * h, x[i] + 0.5 * h * k1)
+        k3 = ode_fun(t[i] + 0.5 * h, x[i] + 0.5 * h * k2)
+        k4 = ode_fun(t[i] + h, x[i] + h * k3)
         x[i + 1] = x[i] + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
     info["n_feval"] = 4 * steps
@@ -422,7 +422,7 @@ def RK4(
 
 
 def SSPRK3(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -445,16 +445,16 @@ def SSPRK3(
 
     x[0] = x0
     for i in range(steps):
-        x1 = x[i] + h * f(t[i], x[i])
-        x2 = 3.0 / 4.0 * x[i] + 1.0 / 4.0 * (x1 + h * f(t[i] + h, x1))
-        x[i + 1] = 1.0 / 3.0 * x[i] + 2.0 / 3.0 * (x2 + h * f(t[i] + h / 2.0, x2))
+        x1 = x[i] + h * ode_fun(t[i], x[i])
+        x2 = 3.0 / 4.0 * x[i] + 1.0 / 4.0 * (x1 + h * ode_fun(t[i] + h, x1))
+        x[i + 1] = 1.0 / 3.0 * x[i] + 2.0 / 3.0 * (x2 + h * ode_fun(t[i] + h / 2.0, x2))
 
     info["n_feval"] = 3 * steps
     return t, x, info
 
 
 def SSPRK34(
-    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
     h: float,
@@ -477,10 +477,10 @@ def SSPRK34(
 
     x[0] = x0
     for i in range(steps):
-        x1 = 1.0 / 2.0 * x[i] + 1.0 / 2.0 * (x[i] + h * f(t[i], x[i]))
-        x2 = 1.0 / 2.0 * x1 + 1.0 / 2.0 * (x1 + h * f(t[i] + h / 2.0, x1))
-        x3 = 2.0 / 3.0 * x[i] + 1.0 / 6.0 * x2 + 1.0 / 6.0 * (x2 + h * f(t[i] + h, x2))
-        x[i + 1] = 1.0 / 2.0 * x3 + 1.0 / 2.0 * (x3 + h * f(t[i] + h / 2.0, x3))
+        x1 = 1.0 / 2.0 * x[i] + 1.0 / 2.0 * (x[i] + h * ode_fun(t[i], x[i]))
+        x2 = 1.0 / 2.0 * x1 + 1.0 / 2.0 * (x1 + h * ode_fun(t[i] + h / 2.0, x1))
+        x3 = 2.0 / 3.0 * x[i] + 1.0 / 6.0 * x2 + 1.0 / 6.0 * (x2 + h * ode_fun(t[i] + h, x2))
+        x[i + 1] = 1.0 / 2.0 * x3 + 1.0 / 2.0 * (x3 + h * ode_fun(t[i] + h / 2.0, x3))
 
     info["n_feval"] = 4 * steps
     return t, x, info
