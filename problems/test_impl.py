@@ -11,7 +11,7 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 # from solvers.embedded import BS23
-from solvers.explicit import AB_k
+from solvers.explicit import PECE, AB_k
 from solvers.implicit import *
 import logging
 from numpy.typing import NDArray
@@ -74,8 +74,9 @@ h = 1e-2
 # results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 results["BackwardsEuler"] = Backwards_Euler(x_dot, x0, t_max, h)
 results["AM3"] = AM_k(x_dot, x0, t_max, h, k=3)
-results["AB3"] = AB_k(x_dot, x0, t_max, h, k=3)
-results["AM5"] = AM_k(x_dot, x0, t_max, h, k=5)
+results["PECE"] = PECE(x_dot, x0, t_max, h)
+results["AM4"] = AM_k(x_dot, x0, t_max, h, k=4, solvertol=1e-8)
+results["AM5"] = AM_k(x_dot, x0, t_max, h, k=5, solvertol=1e-8)
 results["BDF2"] = BDF2(x_dot, x0, t_max, h)
 results["TR-BDF2"] = TRBDF2(x_dot, x0, t_max, h)
 results["BDF3"] = BDF3(x_dot, x0, t_max, h)

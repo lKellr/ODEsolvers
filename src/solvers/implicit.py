@@ -1,4 +1,6 @@
 from numpy._typing._array_like import NDArray
+from numpy import floating
+from numpy._typing._array_like import NDArray
 from typing import Callable, Any
 import numpy as np
 from numpy.typing import NDArray
@@ -135,13 +137,15 @@ def _AM_k(
 
     x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
     f_i = np.empty((k, x0.shape[0]), dtype=x0.dtype)
-    if k > 1:
-        x[:k], inf_starter, f_i[: k - 1] = _AM_k(f, x0, k - 1, h, k - 1, t0)
+    if k > 2:
+        x[:k-1], inf_starter, f_i[: k - 1] = _AM_k(f, x0, k - 2, h, k - 1, t0)
         info = inf_starter
-    else:
+    else: # start with trapezoidal rule
         x[0] = x0
+        f_i[0] = f(t0, x0)
 
-    for i in range(k - 1, steps):
+    steps_starter = k - 2 if k>1 else 0
+    for i in range(steps_starter, steps):
         f_i = np.roll(f_i, 1, axis=0)
 
         if k > 1: # precompute the constant part
@@ -151,12 +155,13 @@ def _AM_k(
 
         def f_imp(x_next): 
             f_i[0] = f(t0 + (i+1) * h, x_next)
-            return x_next - f_const - h * beta[0] * f_i[0]
+            return x_next - (f_const + h * beta[0] * f_i[0])
 
         if jac_fun is None: # Jacobian without setting f_i[0] # TODO: this is probably not efficient
             jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: f(t0 + (i+1) * h, x), 1e-8)
         
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
+
         if not sol_info["success"]:
             print("solver did not converge")
             break
