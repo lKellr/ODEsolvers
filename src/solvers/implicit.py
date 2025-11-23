@@ -1,3 +1,4 @@
+from numpy._typing._array_like import NDArray
 from typing import Callable, Any
 import numpy as np
 from numpy.typing import NDArray
@@ -123,7 +124,7 @@ def _AM_k(
         -275 / 24192,
         -22953 / 3628800,
     ]
-    beta = np.array(
+    beta: NDArray[Any] = np.array(
         [
             (-1) ** (j - 1)
             * sum([gamma[i] * comb(i, j - 1, exact=True) for i in range(j - 1, k)])
@@ -142,11 +143,19 @@ def _AM_k(
 
     for i in range(k - 1, steps):
         f_i = np.roll(f_i, 1, axis=0)
+
+        if k > 1: # precompute the constant part
+            f_const = x[i] + h * beta[1:] @ f_i[1:]
+        else:
+            f_const = x[i]
+
         def f_imp(x_next): 
-            f_i[0] = f(t0 + i * h, x_next)
-            return x_next - x[i] - h * beta @ f_i
+            f_i[0] = f(t0 + (i+1) * h, x_next)
+            return x_next - f_const - h * beta[0] * f_i[0]
+
         if jac_fun is None: # Jacobian without setting f_i[0] # TODO: this is probably not efficient
-            jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: f(t0 + i * h, x), 1e-8)
+            jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: f(t0 + (i+1) * h, x), 1e-8)
+        
         x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
         if not sol_info["success"]:
             print("solver did not converge")
