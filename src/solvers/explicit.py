@@ -381,10 +381,6 @@ def _AB_k(
     for i in range(k - 1, steps):
         f_i = np.roll(f_i, 1, axis=0)
         f_i[0] = f(t0 + i * h, x[i])
-        if k > 2:
-            print(
-                f"xi = {x[i]}; f_i= {f_i[0]}, {f_i[1]}, {f_i[2]}; xi+1 = {x[i] + h * beta @ f_i}"
-            )
         x[i + 1] = x[i] + h * beta @ f_i
 
     info["n_feval"] += steps - k + 1

@@ -31,15 +31,13 @@ results = dict()
 # h = t_max / len(
 #     results["BS23"][0]
 # )  # use the same number of steps as the adaptive scheme to show its advantages
-h = 1e-1
-# results["Euler"] = Euler(x_dot, x0, t_max, h)
-# results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
-# results["Heun"] = Heun(x_dot, x0, t_max, h)
-# results["AB2"] = AB2(x_dot, x0, t_max, h)
-# results["AB3"] = AB3(
-# x_dot, x0, t_max, h
-# )  # TODO: for some reason this function erpforms worse than AB_k(x_dot, x0, t_max, h, k=3)
-# results["PEC"] = PEC(x_dot, x0, t_max, h, n_rep=1)
+h = 1e-2
+results["Euler"] = Euler(x_dot, x0, t_max, h)
+results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
+results["Heun"] = Heun(x_dot, x0, t_max, h)
+results["AB2"] = AB2(x_dot, x0, t_max, h)
+results["AB3"] = AB3(x_dot, x0, t_max, h)
+results["PEC"] = PEC(x_dot, x0, t_max, h, n_rep=1)
 results["PECE"] = PECE(x_dot, x0, t_max, h, n_rep=1)
 results["AB_9"] = AB_k(x_dot, x0, t_max, h, k=9)
 results["SSPRK3"] = SSPRK3(x_dot, x0, t_max, h)

@@ -1,7 +1,8 @@
 from typing import Callable, Any
 import numpy as np
 from numpy.typing import NDArray
-from modules.helpers import root_wrapped
+from scipy.special import comb
+from modules.helpers import numerical_jacobian, root_wrapped
 from modules.root_finding import Newton
 
 
@@ -50,6 +51,110 @@ def Backwards_Euler(
         info["n_lu"] += sol_info["n_lu"]
 
     return t, x, info
+
+
+def AM_k(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    h: float,
+    k: int,
+    t0: float = 0.0,
+    nl_solver: Callable[
+        [
+            Callable[[NDArray[np.floating]], NDArray[np.floating]],
+            NDArray[np.floating],
+            Callable[[NDArray[np.floating]], NDArray[np.floating]] | None,
+            float | NDArray[np.floating],
+        ],
+        tuple[NDArray[np.floating], dict[str, Any]],
+    ] = Newton,
+    jac_fun: Callable[[NDArray[np.floating]], NDArray[np.floating]] | None = None,
+    solvertol: float = 1e-5
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Adams-Moulton formula of variable order k, maximum implemented is 9"""
+    steps = np.ceil((t_max - t0) / h).astype(int)
+    if steps * h / (t_max - t0) - 1.0 > 1e-4:
+        print(f"final step not hitting t_max exactly, instead t_max = {steps * h}")
+
+    t = np.linspace(t0, steps * h, steps + 1, dtype=x0.dtype)
+    x, info, f_values = _AM_k(f=f, x0=x0, steps=steps, h=h, k=k, t0=t0)
+    return t, x, info
+
+
+def _AM_k(
+    f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    steps: int,
+    h: float,
+    k: int,
+    t0: float = 0.0,
+    nl_solver: Callable[
+        [
+            Callable[[NDArray[np.floating]], NDArray[np.floating]],
+            NDArray[np.floating],
+            Callable[[NDArray[np.floating]], NDArray[np.floating]] | None,
+            float | NDArray[np.floating],
+        ],
+        tuple[NDArray[np.floating], dict[str, Any]],
+    ] = Newton,
+    jac_fun: Callable[[NDArray[np.floating]], NDArray[np.floating]] | None = None,
+    solvertol: float = 1e-5
+) -> tuple[NDArray[np.floating], dict[str, Any], NDArray[np.floating]]:
+    """Adams-Moulton of variable order k, this function also returns the computed function values"""
+    assert k <= 9, "highest implemented order is 9"
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+    )
+
+    # compute the coefficients
+    gamma = [
+        1.0,
+        -1 / 2,
+        -1 / 12,
+        -1/24,
+        -19 / 720,
+        -3/160,
+        -863 / 60480,
+        -275 / 24192,
+        -22953 / 3628800,
+    ]
+    beta = np.array(
+        [
+            (-1) ** (j - 1)
+            * sum([gamma[i] * comb(i, j - 1, exact=True) for i in range(j - 1, k)])
+            for j in range(1, k + 1)
+        ]
+    )
+    # TODO: i am not sure about the (-1)**j term, it is not given in my ource, but results are wrong without it
+
+    x = np.zeros((steps + 1, x0.shape[0]), dtype=x0.dtype)
+    f_i = np.empty((k, x0.shape[0]), dtype=x0.dtype)
+    if k > 1:
+        x[:k], inf_starter, f_i[: k - 1] = _AM_k(f, x0, k - 1, h, k - 1, t0)
+        info = inf_starter
+    else:
+        x[0] = x0
+
+    for i in range(k - 1, steps):
+        f_i = np.roll(f_i, 1, axis=0)
+        def f_imp(x_next): 
+            f_i[0] = f(t0 + i * h, x_next)
+            return x_next - x[i] - h * beta @ f_i
+        if jac_fun is None: # Jacobian without setting f_i[0] # TODO: this is probably not efficient
+            jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h*beta[0]*numerical_jacobian(x_next, lambda x: f(t0 + i * h, x), 1e-8)
+        x[i + 1], sol_info = nl_solver(f_imp, x0=x[i], tol=solvertol, jac_fun=jac_fun)
+        if not sol_info["success"]:
+            print("solver did not converge")
+            break
+        info["n_feval"] += sol_info["n_feval"]
+        info["n_jaceval"] += sol_info["n_jaceval"]
+        info["n_lu"] += sol_info["n_lu"]
+    return x, info, f_i
 
 
 def BDF2(
