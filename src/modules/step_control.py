@@ -1,10 +1,8 @@
 from typing import Any, Callable, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import root
-from modules.helpers import norm_hairer
+from modules.helpers import norm_hairer, clip
 import logging
-from collections import namedtuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ def get_PI_parameters_rejected(p: int) -> ControllerParams:
 
 
 def get_step_PI(err_ratio, err_ratio_last, control_params):
-    return np.clip(
+    return clip(
         (1.0 / err_ratio) ** control_params.alpha * err_ratio_last**control_params.beta,
         control_params.s_limits[0],
         control_params.s_limits[1],
@@ -129,10 +127,10 @@ class StepController:
         x_prev: NDArray[np.floating],
         x_pred: NDArray[np.floating],
     ) -> float:
-        if (
-            error == 0.0
-        ).all():  # for linear solutions, estiamted error can be exactly zero
-            return float(np.finfo(error.dtype).max)
+        # if (
+        #     error == 0.0
+        # ).all():  # for linear solutions, estimated error can be exactly zero; NOTE: this check is really expensive
+        #     return float(np.finfo(error.dtype).max)
 
         tol = self.atol + self.rtol * np.maximum(np.abs(x_prev), np.abs(x_pred))
         err_ratio = self.norm(error / tol) / self.safety_tol
@@ -187,11 +185,7 @@ class StepController:
         ):  # use a deadzone
             next_step_size = tried_step_size
         else:
-            next_step_size = np.clip(
-                tried_step_size * step_fac,
-                self.h_limits[0],
-                self.h_limits[1],
-            )
+            next_step_size: float = clip(tried_step_size * step_fac, self.h_limits[0], self.h_limits[1])
 
         if accepted:
             self.prev_step_size = next_step_size

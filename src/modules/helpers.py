@@ -7,6 +7,7 @@ norm_hairer: Callable[[NDArray[np.floating]], float] = (
     lambda x: np.sum(1 / x.size * np.abs(x) ** 2) ** 0.5
 )
 
+clip: Callable[[float, float, float], float] = lambda x, x_min, x_max: min(max(x, x_min), x_max) # runs faster then np.clip since we do  not deal with arrays
 
 def root_wrapped(
     fun: Callable[[NDArray[np.floating]], NDArray[np.floating]],
