@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from scipy.optimize import root
 
 norm_hairer: Callable[[NDArray[np.floating]], float] = (
-    lambda x: np.sum(1 / x.size * np.abs(x) ** 2) ** 0.5
+    lambda x: (np.sum(x ** 2)/ x.size) ** 0.5
 )
 
 clip: Callable[[float, float, float], float] = lambda x, x_min, x_max: min(max(x, x_min), x_max) # runs faster then np.clip since we do  not deal with arrays
