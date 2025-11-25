@@ -33,7 +33,7 @@ def get_PI_parameters_rejected(p: int) -> ControllerParams:
 
 def get_step_PI(err_ratio, err_ratio_last, control_params):
     return np.clip(
-        1.0 / err_ratio**control_params.alpha * err_ratio_last**control_params.beta,
+        (1.0 / err_ratio) ** control_params.alpha * err_ratio_last**control_params.beta,
         control_params.s_limits[0],
         control_params.s_limits[1],
     )
@@ -158,6 +158,10 @@ class StepController:
 
         step_fac: float
         if accepted:
+            logger.debug(
+                msg=f"Accepting step"
+                + (" with retry correction" if self.is_retry else "")
+            )
             step_fac = get_step_PI(
                 err_ratio, self.err_ratio_prev, self.control_params_accepted
             )
@@ -169,11 +173,13 @@ class StepController:
                 self.is_retry = False
             self.err_ratio_prev = err_ratio
         else:
+            logger.debug(
+                msg=f"Rejecting step with error {err_ratio}, h = {tried_step_size}"
+            )
             step_fac = get_step_PI(
                 err_ratio, self.err_ratio_prev, self.control_params_rejected
             )
             self.is_retry = True
-            logger.debug(msg=f"Rejecting step {iter} with error {err_ratio}")
 
         next_step_size: float
         if (
@@ -184,7 +190,7 @@ class StepController:
             next_step_size = np.clip(
                 tried_step_size * step_fac,
                 self.h_limits[0],
-                self.h_limits[1],  # TODO: tried_step_size vs prev_step_size
+                self.h_limits[1],
             )
 
         if accepted:

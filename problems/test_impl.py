@@ -10,6 +10,7 @@ from typing import Any, Callable
 import os
 import numpy as np
 from matplotlib import pyplot as plt
+
 # from solvers.embedded import BS23
 from solvers.explicit import PECE, AB_k
 from solvers.implicit import *
@@ -91,9 +92,12 @@ t_ref = np.linspace(0, t_max, 101)
 axes[0].plot(t_ref, x_analytic(t_ref)[:, 0], label="analyic", linestyle="--")
 
 for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
-    axes[0].plot(time, result[:, 0], label=scheme_name,color=cmap(i))
+    axes[0].plot(time, result[:, 0], label=scheme_name, color=cmap(i))
     axes[1].plot(
-        time, np.linalg.norm(result - x_analytic(time), axis=1), label=scheme_name,color=cmap(i)
+        time,
+        np.linalg.norm(result - x_analytic(time), axis=1),
+        label=scheme_name,
+        color=cmap(i),
     )
 axes[0].legend(frameon=False)
 axes[1].legend(frameon=False)

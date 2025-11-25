@@ -1,4 +1,6 @@
 import logging
+from numpy._typing._array_like import NDArray
+from numpy import copy, floating
 from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
@@ -36,7 +38,7 @@ def DP45(
     step_controller = StepController(**step_controller_kwargs)
 
     if h0 is None:
-        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=5)
+        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=4)
     else:
         h = h0
 
@@ -45,24 +47,24 @@ def DP45(
     t_crit = []
     x_crit = []
 
-    iter = 0
-    k1 = ode_fun(t[0], x[0])  # FSAL property
-    while t[iter] < t_max:  # iterate until t_max is reached
-        if t[iter] + h > t_max:  # shorten h if we would go further than necessary
-            h = t_max - t[iter]
+    ix_step = 0
+    k1 = ode_fun(t0, x0)  # FSAL property
+    while t[ix_step] < t_max:  # iterate until t_max is reached
+        if t[ix_step] + h > t_max:  # shorten h if we would go further than necessary
+            h = t_max - t[ix_step]
+        t_pred = t[ix_step] + h
 
-        t_pred = t[iter] + h
         # calulate k's
-        # k1=ode_fun(t[k], x[k])
-        k2 = ode_fun(t[iter] + 1 / 5 * h, x[iter] + 1 / 5 * h * k1)
-        k3 = ode_fun(t[iter] + 3 / 10 * h, x[iter] + h * (3 * k1 + 9 * k2) / 40)
+        # k1 = ode_fun(t[ix_step], x[ix_step])
+        k2 = ode_fun(t[ix_step] + 1 / 5 * h, x[ix_step] + 1 / 5 * h * k1)
+        k3 = ode_fun(t[ix_step] + 3 / 10 * h, x[ix_step] + h * (3 * k1 + 9 * k2) / 40)
         k4 = ode_fun(
-            t[iter] + 4 / 5 * h,
-            x[iter] + h * (44 / 45 * k1 - 56 / 15 * k2 + 32 / 9 * k3),
+            t[ix_step] + 4 / 5 * h,
+            x[ix_step] + h * (44 / 45 * k1 - 56 / 15 * k2 + 32 / 9 * k3),
         )
         k5 = ode_fun(
-            t[iter] + 8 / 9 * h,
-            x[iter]
+            t[ix_step] + 8 / 9 * h,
+            x[ix_step]
             + h
             * (
                 19372 / 6561 * k1
@@ -72,8 +74,8 @@ def DP45(
             ),
         )
         k6 = ode_fun(
-            t_pred,
-            x[iter]
+            t[ix_step] + h,
+            x[ix_step]
             + h
             * (
                 9017 / 3168 * k1
@@ -84,7 +86,7 @@ def DP45(
             ),
         )
 
-        x_pred = x[iter] + h * (
+        x_pred = x[ix_step] + h * (
             35 / 384 * k1
             + 500 / 1113 * k3
             + 125 / 192 * k4
@@ -104,13 +106,13 @@ def DP45(
             - 1 / 40 * k2
         )
 
-        h, accepted = step_controller.evaluate_step(h, err, x[iter], x_pred)
+        h, accepted = step_controller.evaluate_step(h, err, x[ix_step], x_pred)
 
         if accepted:  # accept result if tolerance is met, or we cant decrease h anymore
-            k1 = k4
-            iter += 1
+            t.append(t_pred)  # NOTE: at this point t_pred != t[ix_step] + h
             x.append(x_pred)
-            t.append(t_pred)
+            k1 = k2
+            ix_step += 1
         else:
             t_crit.append(t_pred)
             x_crit.append(x_pred)
@@ -146,7 +148,7 @@ def BS23(
     step_controller = StepController(**step_controller_kwargs)
 
     if h0 is None:
-        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=3)
+        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=2)
     else:
         h = h0
 
@@ -155,29 +157,29 @@ def BS23(
     t_crit = []
     x_crit = []
 
-    iter = 0
+    ix_step = 0
     k1 = ode_fun(t[0], x[0])  # FSAL
-    while t[iter] < t_max:  # iterate until t_max is reached
-        if t[iter] + h > t_max:  # shorten h if we would go further than necessary
-            h = t_max - t[iter]
+    while t[ix_step] < t_max:  # iterate until t_max is reached
+        if t[ix_step] + h > t_max:  # shorten h if we would go further than necessary
+            h = t_max - t[ix_step]
 
-        t_pred = t[iter] + h
+        t_pred = t[ix_step] + h
         # calulate k's
-        k2 = ode_fun(t[iter] + 1 / 2 * h, x[iter] + 1 / 2 * h * k1)
-        k3 = ode_fun(t[iter] + 3 / 4 * h, x[iter] + 3 / 4 * h * k2)
-        x_pred = x[iter] + h * (2 * k1 + 3 * k2 + 4 * k3) / 9
+        k2 = ode_fun(t[ix_step] + 1 / 2 * h, x[ix_step] + 1 / 2 * h * k1)
+        k3 = ode_fun(t[ix_step] + 3 / 4 * h, x[ix_step] + 3 / 4 * h * k2)
+        x_pred = x[ix_step] + h * (2 * k1 + 3 * k2 + 4 * k3) / 9
         k4 = ode_fun(t_pred, x_pred)
 
         err = -5 / 72 * k1 + 1 / 12 * k2 + 1 / 9 * k3 - 1 / 8 * k4
         # h*np.linalg.norm(71/57600*k1-71/16695*k3+71/1920*k4-17253/339200*k5+22/525*k6-1/40*k2, ord=np.inf) #local error:||x_pred-X_pred7||
 
-        h, accepted = step_controller.evaluate_step(h, err, x[iter], x_pred)
+        h, accepted = step_controller.evaluate_step(h, err, x[ix_step], x_pred)
 
         if accepted:  # accept result if tolerance is met, or we cant decrease h anymore
-            k1 = k4
-            iter += 1
-            x.append(x_pred)
             t.append(t_pred)
+            x.append(x_pred)
+            k1 = k4
+            ix_step += 1
         else:
             t_crit.append(t_pred)
             x_crit.append(x_pred)
