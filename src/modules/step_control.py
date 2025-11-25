@@ -1,80 +1,193 @@
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root
 from modules.helpers import norm_hairer
+import logging
+from collections import namedtuple
+
+logger = logging.getLogger(__name__)
 
 
-class step_controller:
+class ControllerParams(NamedTuple):
+    coeff_i: float
+    coeff_p: float = 0.0
+    s_limits: tuple[float, float] = (0.2, 5.0)
+
+    @property
+    def alpha(self) -> float:
+        return self.coeff_i + self.coeff_p
+
+    @property
+    def beta(self) -> float:
+        return self.coeff_p
+
+
+def get_PI_parameters(p: int) -> ControllerParams:
+    return ControllerParams(coeff_i=0.3 / p, coeff_p=0.4 / p, s_limits=(0.2, 5.0))
+
+
+def get_PI_parameters_rejected(p: int) -> ControllerParams:
+    return ControllerParams(coeff_i=1.0 / p, coeff_p=0.0, s_limits=(0.2, 1.0))
+
+
+def get_step_PI(err_ratio, err_ratio_last, control_params):
+    return np.clip(
+        1.0 / err_ratio**control_params.alpha * err_ratio_last**control_params.beta,
+        control_params.s_limits[0],
+        control_params.s_limits[1],
+    )
+
+
+class StepController:
+    """PI step size controller"""
+
     def __init__(
         self,
+        control_params: ControllerParams,
+        control_params_rejected: ControllerParams,
         atol: float | NDArray[np.floating] = 10**-5,
         rtol: float | NDArray[np.floating] = 10**-3,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
-        safety: float = 0.8,
-        s_limits: tuple[float, float] = (0.2, 5.0),
-        s_deadzone: tuple[float, float] = (0.95, 1.05),
-        h_limits: tuple[float, float] = (0, np.inf),
+        safety_tol: float = (
+            0.9  # is just a modifier for tolerance (after scaling by PI parameters)
+        ),
+        step_rejection_limit: float = 1.2,
+        s_deadzone: tuple[float, float] = (
+            1.0,
+            1.0,
+        ),
+        h_limits: tuple[float, float] = (
+            0,
+            np.inf,
+        ),
     ) -> None:
         self.atol = atol
         self.rtol = rtol
         self.norm = norm
-        self.safety = safety
-        self.s_limits = s_limits
+        self.safety_tol = safety_tol
+
+        self.control_params_accepted = control_params
+        self.control_params_rejected = control_params_rejected
+
+        self.step_rejection_limit = step_rejection_limit
         self.s_deadzone = s_deadzone
         self.h_limits = h_limits
 
-        self.err_ratio_last = (
-            1.0  # TODO: this is not sufficient to force I-behaviour in first step
+        self.err_ratio_prev = 1.0
+        self.is_retry = False
+        self.prev_step_size = float("nan")
+
+    def get_initial_stepFhty(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        x0: NDArray[np.floating],
+        t_max: float,
+        p: int,
+        t0: float = 0.0,
+    ) -> float:
+        """From the Flaherty lecture notes"""
+        tol = self.atol + self.rtol * np.abs(x0)
+
+        step_size0 = (
+            self.norm(tol) / (1 / (t_max - t0) ** p + self.norm(ode_fun(t0, x0)) ** p)
+        ) ** (1 / p)
+        return step_size0
+
+    def get_initial_stepHW(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        x0: NDArray[np.floating],
+        p: int,
+        t0: float = 0.0,
+    ) -> float:
+        """From Hairer & Wanner eq. 4.14"""
+        tol = self.atol + self.rtol * np.abs(x0)
+
+        f0 = ode_fun(t0, x0)
+        d0 = self.norm(x0 / tol)
+        d1 = self.norm(f0 / tol)
+
+        h0: float
+        if d0 < 1e-5 or d1 < 1e-5:
+            h0 = 1e-6
+        else:
+            h0 = 0.01 * (d0 / d1)
+
+        U1_Eul = x0 + h0 * ode_fun(t0, x0)
+        d2 = self.norm((ode_fun(t0 + h0, U1_Eul) - f0) / tol) / h0
+
+        h1 = (0.01 / max(d1, d2)) ** (1 / (p + 1))
+        if max(d1, d2) <= 1e-15:
+            h1 = max(1e-6, h0 * 1e-3)
+
+        return min(100 * h0, h1)
+
+    def _get_error_ratio(
+        self,
+        error: NDArray[np.floating],
+        x_prev: NDArray[np.floating],
+        x_pred: NDArray[np.floating],
+    ) -> float:
+        if (
+            error == 0.0
+        ).all():  # for linear solutions, estiamted error can be exactly zero
+            return float(np.finfo(error.dtype).max)
+
+        tol = self.atol + self.rtol * np.maximum(np.abs(x_prev), np.abs(x_pred))
+        err_ratio = self.norm(error / tol) / self.safety_tol
+        return err_ratio
+
+    def evaluate_step(
+        self,
+        tried_step_size: float,
+        error: NDArray[np.floating],
+        x_prev: NDArray[np.floating],
+        x_pred: NDArray[np.floating],
+    ) -> tuple[float, bool]:
+        err_ratio = self._get_error_ratio(error, x_prev, x_pred)
+
+        accepted: bool = (
+            err_ratio <= self.step_rejection_limit
+            or tried_step_size <= self.h_limits[0]
         )
-
-    def get_initial_step(self) -> float:
-        tol = atol + rtol * np.abs(x0)
-
-        h = (
-            norm(tol) / (1 / (t_max - t0) ** (1 / 5) + norm(f(t0, x0)) ** (1 / 5))
-        ) ** (
-            1 / 5
-        )  # TODO: check exponents, step_controller.h0
-        return h
-
-    def get_step(self, error) -> tuple[float, bool]:
-        tol = atol + rtol * np.maximum(np.abs(x[iter]), np.abs(x_pred))
-        err_ratio = norm(err / tol)  # TODO: h required?
-        # TODO: divide by zero errors
-
-        # TODO: init err_ratio
-        # TODO: beta
-
-        s = step_safety * step_controller(err_ratio, err_ratio_last)
-
-        s = np.clip(
-            s,
-            s_limits[0],
-            s_limits[1],
-        )  # s gets clipped to prevent to extreme changes of h, also err might become zero
-        if s > s_deadzone[0] and s < s_deadzone[1]:  # use a deadzone
-            s = 1.0
-
-        accepted = err_ratio <= 1 or next_step_size <= h_limits[0]
-        if err_ratio > 1:
-            logger.warn(
-                f"Accepting step with too large error {err_ratio} since further step size decrease from h = {h} is not possible."
+        if accepted and err_ratio > self.step_rejection_limit:
+            logger.warning(
+                f"Accepting step with too large error {err_ratio} since further step size decrease from h = {tried_step_size} is not possible."
             )
-        next_step_size = np.clip(current_step_size * s, h_limits[0], h_limits[1])
+
+        step_fac: float
+        if accepted:
+            step_fac = get_step_PI(
+                err_ratio, self.err_ratio_prev, self.control_params_accepted
+            )
+            # correction if the previous step has been rejected: multiply by ratio of tried step to last succesful step (Gustafsson1991)
+            if self.is_retry:
+                step_fac *= (  # TODO: first step self.prev_step_size is not initialized!
+                    tried_step_size / self.prev_step_size
+                )
+                self.is_retry = False
+            self.err_ratio_prev = err_ratio
+        else:
+            step_fac = get_step_PI(
+                err_ratio, self.err_ratio_prev, self.control_params_rejected
+            )
+            self.is_retry = True
+            logger.debug(msg=f"Rejecting step {iter} with error {err_ratio}")
+
+        next_step_size: float
+        if (
+            step_fac > self.s_deadzone[0] and step_fac < self.s_deadzone[1]
+        ):  # use a deadzone
+            next_step_size = tried_step_size
+        else:
+            next_step_size = np.clip(
+                tried_step_size * step_fac,
+                self.h_limits[0],
+                self.h_limits[1],  # TODO: tried_step_size vs prev_step_size
+            )
 
         if accepted:
-            err_ratio_last = err_ratio
-        else:
-            # TODO: cahnge parametes for next step
-            logger.debug(msg=f"Rejecting step {iter} with error {err_ratio}")
+            self.prev_step_size = next_step_size
+
         return next_step_size, accepted
-
-
-controller_I: Callable[[float, float, float], float] = (
-    lambda err_ratio, err_ratio_last, p: err_ratio ** (-1 / p)
-)
-controller_PI: Callable[[float, float, float, float], float] = (
-    lambda err_ratio, err_ratio_last, alpha, beta: err_ratio ** (-alpha)
-    * err_ratio_last**beta
-)

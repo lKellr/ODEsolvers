@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-# from solvers.embedded import BS23, DP45
+from solvers.embedded import BS23, DP45
 from solvers.explicit import *
 import logging
 
@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 
-cmap = plt.get_cmap("tab10")
+cmap = plt.get_cmap("tab20")
 
 
 x_dot = lambda t, x: np.array(
@@ -27,11 +27,10 @@ x0 = np.array([1.0, np.e])
 x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
 
 results = dict()
-# results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
-# h = t_max / len(
-#     results["BS23"][0]
-# )  # use the same number of steps as the adaptive scheme to show its advantages
-h = 1e-2
+results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
+h = t_max / len(
+    results["BS23"][0]
+)  # use the same number of steps as the adaptive scheme to show its advantages
 results["Euler"] = Euler(x_dot, x0, t_max, h)
 results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
 results["Heun"] = Heun(x_dot, x0, t_max, h)
@@ -43,8 +42,9 @@ results["AB_9"] = AB_k(x_dot, x0, t_max, h, k=9)
 results["SSPRK3"] = SSPRK3(x_dot, x0, t_max, h)
 results["SSPRK34"] = SSPRK34(x_dot, x0, t_max, h)
 results["RK4"] = RK4(x_dot, x0, t_max, h)
-# results["DP45"] = DP45(x_dot, x0, t_max, h)
+results["DP45"] = DP45(x_dot, x0, t_max, h)
 
+# results
 fig, axes = plt.subplots(2, 1)
 axes[0].set_ylim(-5, 5)
 axes[1].set_xlim(0.1)
@@ -64,10 +64,11 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
         color=cmap(i),
     )
 plt.legend(frameon=False)
+plt.tight_layout()
 plt.show()
 
 
-##  efficiency
+#  efficiency
 fig, ax = plt.subplots()
 
 ax.set_title("Work-Precision")
@@ -84,4 +85,40 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
         color=cmap(i),
     )
 ax.legend(frameon=False)
+plt.tight_layout()
+plt.show()
+
+# step control
+fig, ax = plt.subplots()
+ax.set_ylabel("step")
+ax.set_xlabel("time")
+
+ax.plot(
+    0.5 * (results["BS23"][0][:-1] + results["BS23"][0][1::]),
+    np.diff(results["BS23"][0]),
+    label="BS23",
+    color=cmap(0),
+)
+# ax.plot(
+#     results["BS23"][2]["restarts"][0],
+#     np.diff(results["BS23"][0]),
+#     marker="o",
+#     linestyle="None",
+#     color=cmap(0),
+# )
+ax.plot(
+    0.5 * (results["DP45"][0][:-1] + results["DP45"][0][1::]),
+    np.diff(results["DP45"][0]),
+    label="DP45",
+    color=cmap(1),
+)
+# ax.plot(
+#     results["DP45"][2]["restarts"][0],
+#     np.diff(results["DP45"][0]),
+#     marker="o",
+#     linestyle="None",
+#     color=cmap(1),
+# )
+ax.legend(frameon=False)
+plt.tight_layout()
 plt.show()

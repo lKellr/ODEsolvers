@@ -123,7 +123,9 @@ def AB2(
     _, x[:2], inf_starter = Midpoint(ode_fun, x0, t0 + h, h, t0)
     info = inf_starter
 
-    f_ii = ode_fun(t[0], x[0])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(
+        t[0], x[0]
+    )  # TODO: this has already been evaluated in the starting method
     for i in range(1, steps):
         f_i = ode_fun(t[i], x[i])
         x[i + 1] = x[i] + h / 2 * (3 * f_i - f_ii)
@@ -157,14 +159,13 @@ def AB3(
     _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_ii = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_ii = ode_fun(
+        t[1], x[1]
+    )  # TODO: this has already been evaluated in the starting method
     f_iii = ode_fun(t[0], x[0])
 
     for i in range(2, steps):
         f_i = ode_fun(t[i], x[i])
-        print(
-            f"xi = {x[i]}; f_i= {f_i}, {f_ii}, {f_iii}; xi+1 = {x[i] + h / 12.0 * (23.0 * f_i - 16.0 * f_ii + 5.0 * f_iii)}"
-        )
         x[i + 1] = x[i] + h / 12.0 * (23.0 * f_i - 16.0 * f_ii + 5.0 * f_iii)
         f_iii = f_ii
         f_ii = f_i
@@ -198,7 +199,9 @@ def PECE(
     _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_i = ode_fun(
+        t[1], x[1]
+    )  # TODO: this has already been evaluated in the starting method
     f_ii = ode_fun(t[0], x[0])
     for i in range(2, steps):
         f_iii = f_ii
@@ -242,7 +245,9 @@ def PECE_tol(
     _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = ode_fun(t[1], x[1])  # TODO: this has already been evaluated in the starting method
+    f_i = ode_fun(
+        t[1], x[1]
+    )  # TODO: this has already been evaluated in the starting method
     f_ii = ode_fun(t[0], x[0])
     for i in range(2, steps):
         f_iii = f_ii
@@ -291,7 +296,9 @@ def PEC(
     _, x[:3], inf_starter = AB2(ode_fun, x0, t0 + 2 * h, h, t0)
     info = inf_starter
 
-    f_i = ode_fun(t[2], x[2])  # TODO: this has already been evaluated in the starting method
+    f_i = ode_fun(
+        t[2], x[2]
+    )  # TODO: this has already been evaluated in the starting method
     f_ii = ode_fun(t[1], x[1])
     f_iii = ode_fun(t[0], x[0])
     for i in range(2, steps):
@@ -479,7 +486,11 @@ def SSPRK34(
     for i in range(steps):
         x1 = 1.0 / 2.0 * x[i] + 1.0 / 2.0 * (x[i] + h * ode_fun(t[i], x[i]))
         x2 = 1.0 / 2.0 * x1 + 1.0 / 2.0 * (x1 + h * ode_fun(t[i] + h / 2.0, x1))
-        x3 = 2.0 / 3.0 * x[i] + 1.0 / 6.0 * x2 + 1.0 / 6.0 * (x2 + h * ode_fun(t[i] + h, x2))
+        x3 = (
+            2.0 / 3.0 * x[i]
+            + 1.0 / 6.0 * x2
+            + 1.0 / 6.0 * (x2 + h * ode_fun(t[i] + h, x2))
+        )
         x[i + 1] = 1.0 / 2.0 * x3 + 1.0 / 2.0 * (x3 + h * ode_fun(t[i] + h / 2.0, x3))
 
     info["n_feval"] = 4 * steps
