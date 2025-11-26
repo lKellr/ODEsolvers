@@ -7,6 +7,13 @@ from helpers import norm_hairer
 
 from scipy.linalg import lu_factor, lu_solve
 
+from modules.helpers import numerical_jacobian
+from modules.step_control import (
+    get_PI_parameters,
+    StepController,
+    get_PI_parameters_rejected,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,33 +29,16 @@ class Extrapolation_Solver(ABC):
             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
         ) = None,
         mass_matrix: NDArray[np.floating] | None = None,
-        atol: float = 1e-11,
-        rtol: float = 1e-5,
-        stepfac_min: float = 0.2,
-        stepfac_max: float = 5.,
         restart_step_multiplier: float = 0.5,
         table_size: int = 8,
+        **step_controller_kwargs: dict[str, Any]
     ):
-
-        self.atol = atol
-        self.rtol = rtol
-        self.stepfac_min = stepfac_min
-        self.stepfac_max = stepfac_max
-        self.restart_step_multiplier = restart_step_multiplier
+        # self.restart_step_multiplier = restart_step_multiplier
 
         self.table_size: int = table_size
         self.num_odes = num_odes
         self.ode_fun = ode_fun
         if jac_fun is None:
-
-            def numerical_jacobian(t, x, f, delta):
-                jac = np.empty((self.num_odes, self.num_odes))
-                for j in range(self.num_odes):
-                    shift = np.zeros_like(x)
-                    shift[j] = delta
-                    jac[:, j] = (f(t, x + shift) - f(t, x)) / delta
-                return jac
-
             self.jac_fun = lambda t, x: numerical_jacobian(t, x, ode_fun, delta=1e-8)
         else:
             self.jac_fun = jac_fun
@@ -87,6 +77,14 @@ class Extrapolation_Solver(ABC):
         total_fevals_per_step = np.cumsum([self.fevals_per_step]*(table_size-1))
         self.feval_ratios = np.array([total_fevals_per_step[i+1]/total_fevals_per_step[i] for i in range(len(total_fevals_per_step)-1)])
 
+        if "control_params" not in step_controller_kwargs.keys():
+            step_controller_kwargs["control_params"] = get_PI_parameters(4)
+        if "control_params_rejected" not in step_controller_kwargs.keys():
+            step_controller_kwargs["control_params_rejected"] = get_PI_parameters_rejected(
+                4
+            )
+        step_controller = StepController(**step_controller_kwargs | dict(atol = 1e-11, rtol = 1e-5)) # addition of default values
+
     @abstractmethod
     def base_scheme(
         self,
@@ -119,20 +117,20 @@ class Extrapolation_Solver(ABC):
         T_table_k[n_columns] = T_extrap
 
     def extrapolation_step(
-        self, t0: float, U0: NDArray[np.floating], step_size
+        self, t_prev: float, x_prev: NDArray[np.floating], step_size: float, k_target: float
     ) -> tuple[NDArray[np.floating], dict[str, Any]]:
         """Performs an extrapolation step of U0 until t + step_size.
         Repeated extrapolation until the target tolerance is met."""
-        err = np.empty_like(U0)
-        err_prev = np.empty_like(U0)  # required for overflow remedy
+        err = np.empty_like(x_prev)
+        err_prev = np.empty_like(x_prev)  # required for overflow remedy
 
         # calculate initial jacobian, will be reused at the start of each extrapolation step
-        jac0 = self.jac_fun(t0, U0)
+        jac0 = self.jac_fun(t_prev, x_prev)
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
         T_table_k = np.empty((self.table_size, self.num_odes))
         T_table_k[0] = self.base_scheme(
-            U0, t0, t_max=t0 + step_size, n_steps=self.step_seq[0], jac0=jac0
+            x_prev, t_prev, t_max=t_prev + step_size, n_steps=self.step_seq[0], jac0=jac0
         )
 
         step_info: dict[str, Any] = dict(
@@ -143,13 +141,11 @@ class Extrapolation_Solver(ABC):
             max_substeps=np.nan,
         )
         iterator_table = 1
-        # TODO: parallelization: compute all T_k1 in parallel, then loop to extrapolate to target order,
-        # dispatch all, but discard those (unfinished) which are not needed because of already sufficiently low error
         while True:
             # Basic operations: compute with more steps, then fill row in tableau
             T_fine_first_order = self.base_scheme(
-                U0,
-                t0,
+                x_prev,
+                t_prev,
                 t_max=step_size,
                 n_steps=self.step_seq[iterator_table],
                 jac0=jac0,
@@ -166,7 +162,7 @@ class Extrapolation_Solver(ABC):
 
             # exit conditions
             if(iterator_table == iterator_target-1) # TODO: greater equal?, why can i not check this earlier?
-                tol = self.atol + self.rtol * np.maximum(np.abs(U0), np.abs(T_table_k[iterator_table]))
+                tol = self.atol + self.rtol * np.maximum(np.abs(x_prev), np.abs(T_table_k[iterator_table]))
                 err_ratio = np.linalg.norm(err/tol, ord=np.inf) # alternative: norm_hairer
                 step_opt, step_opt_prev, work_per_step, work_per_step_prev
                 if(err_ratio < 1): # a) Convergence in line k − 1
@@ -179,7 +175,7 @@ class Extrapolation_Solver(ABC):
                     step_info["exit_status"] = "Success"
                     logger.debug("Success: Tolerance reached in line k-1")
                     break
-            else: # b) Convergence monitor: do we expect conergence in later steps?
+            else: # b) Convergence monitor: do we expect convergence in later steps?
 
 
             elif iterator_table >= 2 and np.any(
@@ -202,7 +198,7 @@ class Extrapolation_Solver(ABC):
         return T_table_k[iterator_table], step_info
 
     def solve(
-        self, U0: NDArray[np.floating], t_max: float, t0: float = 0, step0: float|None = None
+        self, U0: NDArray[np.floating], t_max: float, t0: float = 0, step0: float | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
 
         solve_info: dict[str, Any] = dict(
@@ -212,8 +208,9 @@ class Extrapolation_Solver(ABC):
             n_restarts=0,
         )
 
-        if(step0 == None):
-            step = self.initial_step(U0, t0)
+        step: float
+        if step0 is None:
+            step = self.step_controller.get_initial_stepHW(self.ode_fun, U0, t0=t0, p=4)
         else:
             step = step0
 
@@ -223,6 +220,8 @@ class Extrapolation_Solver(ABC):
 
         current_time = t0
         while current_time < t_max:
+            if current_time + step > t_max:  # shorten h if we would go further than necessary
+                step = t_max - current_time
             logger.debug(f"Starting step at time {current_time} of {t_max}")
 
             # do step
@@ -240,7 +239,8 @@ class Extrapolation_Solver(ABC):
             )
 
             # find optimal step size
-            step = self.optimal_step()
+            step, accepted = self.step_controller.evaluate_step(tried_step_size=step, err, x[ix_step], x_pred)
+            step = 0.94 * (0.65/err_ratio)**(1/(2*k-1)) # TODO: is this correct also for SEULEX?
 
             if accepted:
                 solution.append(new_solution)
@@ -258,36 +258,6 @@ class Extrapolation_Solver(ABC):
 
         return np.array(time), np.array(solution), solve_info
 
-    def optimal_step(self):
-        step: Any = step * np.clip(0.94 * (0.65/err_ratio)**(1/(2*k-1)), self.stepfac_min, self.stepfac_max) # TODO: is this correct also for SEULEX?
-        # TODO: check for step rejection
-        # TODO: set stepfac_max after step rejection
-        # TODO: PI controller, Gustafsson acceleration
-        # TODO: try to keep steady?
-        if (current_time + step > t_max):
-            current_time: float = t_max
-
-
-    def initial_step(self, U0: NDArray[np.floating], t0: float=0., norm:Callable[[NDArray[np.floating]], float] = norm_hairer):
-        """From Hairer & Wanner eq. 4.14"""
-        tol = self.atol + self.rtol * np.abs(U0)
-
-        f0 = self.ode_fun(t0, U0)
-        d0 = norm(U0)
-        d1 = norm(f0)
-
-        h0 = 0.01*(d0/d1)
-        if d0 < 1e-5 or d1 < 1e-5:
-            h0 = 1e-6
-
-        U1_Eul = U0 + h0 * self.ode_fun(t0, U0)
-        d2 = norm(self.ode_fun(t0 + h0, U1_Eul)- f0)/h0
-
-        h1 = (0.01/max(d1, d2))**(1/(self.base_order?+1))
-        if max(d1, d2) <= 1e-15:
-            h1 = max(1e-6, h0*1e-3)
-
-        return min(100*h0, h1)
 
 class EULEX(Extrapolation_Solver):
     def __init__(

@@ -170,6 +170,7 @@ class StepController:
                 )
                 self.is_retry = False
             self.err_ratio_prev = err_ratio
+            self.prev_step_size = tried_step_size * step_fac # NOTE: without deadzone and clipping, this should not be problematic since we use it just for improving rejected estiamtes
         else:
             logger.debug(
                 msg=f"Rejecting step with error {err_ratio}, h = {tried_step_size}"
@@ -185,9 +186,6 @@ class StepController:
         ):  # use a deadzone
             next_step_size = tried_step_size
         else:
-            next_step_size: float = clip(tried_step_size * step_fac, self.h_limits[0], self.h_limits[1])
-
-        if accepted:
-            self.prev_step_size = next_step_size
+            next_step_size = clip(tried_step_size * step_fac, self.h_limits[0], self.h_limits[1])
 
         return next_step_size, accepted

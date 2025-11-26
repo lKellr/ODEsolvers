@@ -1,5 +1,3 @@
-from numpy._typing._array_like import NDArray
-from numpy._typing._array_like import NDArray
 from typing import Any, Callable
 
 from time import perf_counter
@@ -8,8 +6,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 import os
 
-from solvers.simple_explicit import *
-from solvers.Extrapolation_Scheme import SEULEX
+from solvers.embedded import *
+from solvers.explicit import *
+from solvers.implicit import *
+
+# from solvers.Extrapolation_Scheme import SEULEX
 
 # ODE problem
 ## Pendulum
@@ -29,21 +30,26 @@ x0 = np.array([np.pi / 2, 0.0])
 # create reference solution
 def create_solution(x_dot, x0, t_max):
     h = t_max / 1e5
-    t, x, info = RK4(x_dot, x0.astype(np.longdouble), t_max, h, t0=0)
+    t, x, info = DP45(x_dot, x0.astype(np.longdouble), t_max, atol=1e-8, rtol=1e-6)
 
     fig, ax = plt.subplots()
     ax.plot(t, x[0])
     ax.plot(t, x[1])
     plt.show()
-    return x[:, -1]
+
+    return t, x
 
 
-ref_path = "reference_solution.npy"
-if os.path.exists(ref_path):
-    x_ref = np.load(ref_path)
+ref_path = "reference_solution"
+if os.path.exists(ref_path + ".npz"):
+    dat = np.load(ref_path + ".npz")
+    t_ref, x_ref = dat["t"], dat["x"]
 else:
-    x_ref = create_solution(x_dot, x0, t_max)
-    np.save(ref_path, x_ref)
+    t_ref, x_ref = create_solution(x_dot, x0, t_max)
+    np.savez_compressed(ref_path, t=t_ref, x=x_ref)
+x_analytic = lambda t: np.array(
+    [np.interp(t, t_ref, x_ref[:, i]) for i in range(x0.size)]
+).T
 
 
 # benchmark function

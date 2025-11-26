@@ -27,38 +27,38 @@ logger_mpb.setLevel(logging.INFO)
 cmap = plt.get_cmap("tab10")
 
 
-## Duffing oscillator
-alpha = -1.0
-beta = 1.0
-gamma = 3.0
-delta = 0.02
-omega = 1.0
+# ## Duffing oscillator
+# alpha = -1.0
+# beta = 1.0
+# gamma = 3.0
+# delta = 0.02
+# omega = 1.0
 
 
-x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
-    lambda t, x: np.array(
-        [
-            x[1],
-            gamma * np.cos(omega * t)
-            - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3),
-        ]
-    )
-)
-
-t_max = 8 * np.pi
-x0 = np.array([1.0, 0])
-
-# # rescaled Van der Pol oscillator
-# epsilon = 1e-6
 # x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
-#     lambda t, x: np.array([x[1], ((1 - x[0] ** 2) * x[1] - x[0]) / epsilon])
+#     lambda t, x: np.array(
+#         [
+#             x[1],
+#             gamma * np.cos(omega * t)
+#             - (delta * x[1] + alpha * x[0] + beta * x[0] ** 3),
+#         ]
+#     )
 # )
-# t_max = 1
-# x0: NDArray[np.floating] = np.array([2.0, 0.0])
+
+# t_max = 8 * np.pi
+# x0 = np.array([1.0, 0])
+
+# rescaled Van der Pol oscillator
+epsilon = 1e-6
+x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
+    lambda t, x: np.array([x[1], ((1 - x[0] ** 2) * x[1] - x[0]) / epsilon])
+)
+t_max = 1
+x0: NDArray[np.floating] = np.array([2.0, 0.0])
 
 
 ref_path = (
-    f"reference_duffing"  # TODO: change if t_max, x0, oscillator parameters are changed
+    f"reference_VdP"  # TODO: change if t_max, x0, oscillator parameters are changed
 )
 if os.path.exists(ref_path + ".npz"):
     dat = np.load(ref_path + ".npz")

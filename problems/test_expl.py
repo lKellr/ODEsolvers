@@ -7,8 +7,6 @@ from solvers.explicit import *
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
-# logger_ode = logging.getLogger("solvers.root_finding")
-# logger_ode.setLevel(logging.INFO)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 
@@ -33,16 +31,15 @@ h = t_max / len(
     results["BS23"][0]
 )  # use the same number of steps as the adaptive scheme to show its advantages
 results["Euler"] = Euler(x_dot, x0, t_max, h)
-# results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
-# results["Heun"] = Heun(x_dot, x0, t_max, h)
-# results["AB2"] = AB2(x_dot, x0, t_max, h)
-# results["AB3"] = AB3(x_dot, x0, t_max, h)
-# results["PEC"] = PEC(x_dot, x0, t_max, h, n_rep=1)
-# results["PECE"] = PECE(x_dot, x0, t_max, h, n_rep=1)
-# results["AB_6"] = AB_k(x_dot, x0, t_max, h, k=6)
-# results["SSPRK3"] = SSPRK3(x_dot, x0, t_max, h)
-# results["SSPRK34"] = SSPRK34(x_dot, x0, t_max, h)
-results["RK4"] = RK4(x_dot, x0, t_max, h)
+results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
+results["Heun"] = Heun(x_dot, x0, t_max, h)
+results["AB2"] = AB2(x_dot, x0, t_max, h)
+results["AB3"] = AB3(x_dot, x0, t_max, h)
+results["PEC"] = PEC(x_dot, x0, t_max, h, n_rep=1)
+results["PECE"] = PECE(x_dot, x0, t_max, h, n_rep=1)
+results["AB_6"] = AB_k(x_dot, x0, t_max, h, k=6)
+results["SSPRK3"] = SSPRK3(x_dot, x0, t_max, h)
+results["SSPRK34"] = SSPRK34(x_dot, x0, t_max, h)
 results["DP45"] = DP45(
     x_dot,
     x0,
@@ -73,6 +70,9 @@ results["DP45_I"] = DP45(
         coeff_i=1.0 / 4.0, coeff_p=0.0, s_limits=(0.2, 5.0)
     ),
 )
+results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(
+    results["DP45"][0]
+))
 
 
 # results
