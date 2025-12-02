@@ -165,12 +165,12 @@ class StepController:
             )
             # correction if the previous step has been rejected: multiply by ratio of tried step to last succesful step (Gustafsson1991)
             if self.is_retry:
-                step_fac *= (  # TODO: first step self.prev_step_size is not initialized!
-                    tried_step_size / self.prev_step_size
-                )
+                step_fac *= tried_step_size / self.prev_step_size
                 self.is_retry = False
             self.err_ratio_prev = err_ratio
-            self.prev_step_size = tried_step_size * step_fac # NOTE: without deadzone and clipping, this should not be problematic since we use it just for improving rejected estiamtes
+            self.prev_step_size = (
+                tried_step_size * step_fac
+            )  # NOTE: without deadzone and clipping, this should not be problematic since we use it just for improving rejected estiamtes
         else:
             logger.debug(
                 msg=f"Rejecting step with error {err_ratio}, h = {tried_step_size}"
@@ -179,6 +179,10 @@ class StepController:
                 err_ratio, self.err_ratio_prev, self.control_params_rejected
             )
             self.is_retry = True
+            if np.isnan(
+                self.prev_step_size
+            ):  # first step self.prev_step_size is not initialized!
+                self.prev_step_size = tried_step_size
 
         next_step_size: float
         if (
@@ -186,6 +190,8 @@ class StepController:
         ):  # use a deadzone
             next_step_size = tried_step_size
         else:
-            next_step_size = clip(tried_step_size * step_fac, self.h_limits[0], self.h_limits[1])
+            next_step_size = clip(
+                tried_step_size * step_fac, self.h_limits[0], self.h_limits[1]
+            )
 
         return next_step_size, accepted
