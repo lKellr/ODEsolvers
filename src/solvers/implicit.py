@@ -5,7 +5,12 @@ from typing import Callable, Any
 import numpy as np
 from numpy.typing import NDArray
 from scipy.special import comb
-from modules.helpers import norm_hairer, numerical_jacobian, root_wrapped
+from modules.helpers import (
+    norm_hairer,
+    numerical_jacobian,
+    numerical_jacobian_t,
+    root_wrapped,
+)
 from modules.root_finding import Newton, NewtonODE
 
 
@@ -169,7 +174,7 @@ def _AM_k(
         ):  # Jacobian without setting f_i[0] # TODO: this is probably not efficient
             jac_fun = lambda x_next: np.eye(x_next.shape[0]) - h * beta[
                 0
-            ] * numerical_jacobian(x_next, lambda x: ode_fun(t0 + (i + 1) * h, x), 1e-8)
+            ] * numerical_jacobian_t(x_next, t0 + (i + 1) * h, ode_fun, 1e-8)
 
         x[i + 1], success, sol_info = nl_solver(
             f_imp,
