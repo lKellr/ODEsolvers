@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Literal, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
@@ -209,10 +209,7 @@ class StepControllerPI(StepController):
 
         return next_step_size, accepted
 
-
-class StepControllerExtrapKH(StepController):
-    """Combined order and step size (k-h) controller for extrapolation methods. Following the strategy layed out in Hairer&Wanner and modified in Numerical Recipes. Originally proposed by Deulfhard"""
-
+class StepControllerExtrap(StepController, ABC):
     def __init__(
         self,
         table_size: int,
@@ -223,36 +220,14 @@ class StepControllerExtrapKH(StepController):
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
-        work_order_limits: tuple[float, float] = (0.8, 0.9),
         step_multiplier_divergence: float = 0.5,
-        rel_jac_cost: float = num_odes,  # TODO: put into named tuple
-        rel_lu_cost: float = 0.5,
-        rel_backsub_cost: float = 0.0,
     ) -> None:
         super().__init__(atol, rtol, norm, safety_tol)
 
         self.table_size = table_size
 
-        self.err_inc_fac = np.array(
-            [
-                (step_seq[k] / step_seq[0]) ** (1 + is_symmetric)
-                for k in range(table_size - 1)
-            ]
-        )
-
-        feval_cost_per_kstep = (
-            step_seq
-            + is_symmetric
-            + is_implicit * (rel_lu_cost + step_seq * rel_backsub_cost)
-        )
-        self.total_feval_cost_at_kstep = (
-            np.cumsum(feval_cost_per_kstep)
-            + is_implicit * rel_jac_cost
-        )
-
         self.safety_unscaled = safety_unscaled
         self.s_limits_scaled = s_limits_scaled
-        self.work_order_limits = work_order_limits
         self.step_multiplier_divergence = step_multiplier_divergence
 
     def get_initial_ktarget(self) -> int:
@@ -274,6 +249,54 @@ class StepControllerExtrapKH(StepController):
             1 / temp_s_limit_descaled,
         )
         return s_opt
+
+    @abstractmethod
+    def _get_params_next_step(
+        self, err_ratio: float, err_ratio_prev_col: float, k_check: int
+    ) -> tuple[int, float]:
+        raise NotImplementedError()
+
+class StepControllerExtrapKH(StepControllerExtrap):
+    """Combined order and step size (k-h) controller for extrapolation methods. Following the strategy layed out in Hairer&Wanner and modified in Numerical Recipes. Originally proposed by Deulfhard"""
+
+    def __init__(
+        self,
+        table_size: int,
+        step_seq:NDArray[np.integer],
+        atol: float | NDArray[np.floating] = 10**-8,
+        rtol: float | NDArray[np.floating] = 10**-5,
+        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        safety_unscaled: float = (0.94),
+        safety_tol: float = (0.65),
+        s_limits_scaled: tuple[float, float] = (0.02, 4.0),
+        work_order_limits: tuple[float, float] = (0.8, 0.9),
+        step_multiplier_divergence: float = 0.5,
+        rel_jac_cost: float = num_odes,  # TODO: put into named tuple
+        rel_lu_cost: float = 0.5,
+        rel_backsub_cost: float = 0.0,
+    ) -> None:
+        super().__init__(atol, rtol, norm, safety_tol)
+
+
+        self.err_inc_fac = np.array(
+            [
+                (step_seq[k] / step_seq[0]) ** (1 + is_symmetric)
+                for k in range(table_size - 1)
+            ]
+        )
+
+        feval_cost_per_kstep = (
+            step_seq
+            + is_symmetric
+            + is_implicit * (rel_lu_cost + step_seq * rel_backsub_cost)
+        )
+        self.total_feval_cost_at_kstep = (
+            np.cumsum(feval_cost_per_kstep)
+            + is_implicit * rel_jac_cost
+        )
+
+        self.work_order_limits = work_order_limits
+
 
     def _get_params_next_step(
         self, err_ratio: float, err_ratio_prev_col: float, k_check: int
@@ -360,7 +383,7 @@ class StepControllerExtrapKH(StepController):
             state = "retry"
       return next_k, next_step_mult, state
 
-class StepControllerExtrapH(StepController):
+class StepControllerExtrapH(StepControllerExtrap):
     """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller"""
 
     def __init__(
@@ -376,27 +399,9 @@ class StepControllerExtrapH(StepController):
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
     ) -> None:
-        super().__init__(atol, rtol, norm, safety_tol)
-
-        self.table_size = table_size
+        super().__init__(table_size, step_seq, atol, rtol, norm, safety_tol)
 
         self.order = order
-
-        self.safety_unscaled = safety_unscaled
-        self.s_limits_scaled = s_limits_scaled
-        self.step_multiplier_divergence = step_multiplier_divergence
-
-    def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
-        s_opt = self.safety_unscaled * (self.safety_tol / err_ratio_k) ** (
-            1 / (2 * next_k + 1)
-        )
-        temp_s_limit_descaled = self.s_limits_scaled[0] ** (1 / (2 * next_k + 1))
-        s_opt = clip(
-            s_opt,
-            temp_s_limit_descaled / self.s_limits_scaled[1],
-            1 / temp_s_limit_descaled,
-        )
-        return s_opt
 
     def evaluate_step(self, table_col_ix:int, k_target: int,
         error: NDArray[np.floating],
@@ -417,7 +422,7 @@ class StepControllerExtrapH(StepController):
 
       return next_k, next_step_mult, state
 
-class StepControllerExtrapP(StepController):
+class StepControllerExtrapP(StepControllerExtrap):
     """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance"""
 
     def __init__(
@@ -432,31 +437,14 @@ class StepControllerExtrapP(StepController):
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
     ) -> None:
-        super().__init__(atol, rtol, norm, safety_tol)
+        super().__init__(table_size, step_seq, atol, rtol, norm, safety_tol)
 
-        self.table_size = table_size
         self.err_inc_fac = np.array(
             [
                 (step_seq[k] / step_seq[0]) ** (1 + is_symmetric)
                 for k in range(table_size - 1)
             ]
         )
-
-        self.safety_unscaled = safety_unscaled
-        self.s_limits_scaled = s_limits_scaled
-        self.step_multiplier_divergence = step_multiplier_divergence
-
-    def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
-        s_opt = self.safety_unscaled * (self.safety_tol / err_ratio_k) ** (
-            1 / (2 * next_k + 1)
-        )
-        temp_s_limit_descaled = self.s_limits_scaled[0] ** (1 / (2 * next_k + 1))
-        s_opt = clip(
-            s_opt,
-            temp_s_limit_descaled / self.s_limits_scaled[1],
-            1 / temp_s_limit_descaled,
-        )
-        return s_opt
 
     def evaluate_step(self, table_col_ix:int, k_target: int,
         error: NDArray[np.floating],

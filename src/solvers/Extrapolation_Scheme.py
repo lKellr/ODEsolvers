@@ -27,7 +27,9 @@ class Extrapolation_Solver(ABC):
         mass_matrix: NDArray[np.floating] | None = None,
         restart_step_multiplier: float = 0.5,
         table_size: int = 8,
-        step_controller: StepController = StepControllerExtrapKH(table_size, step_seq),
+        step_controller: StepController | None = StepControllerExtrapKH(
+            table_size, step_seq
+        ),
     ):
         self.table_size: int = table_size
         self.num_odes = num_odes
