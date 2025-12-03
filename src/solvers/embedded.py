@@ -6,9 +6,9 @@ import numpy as np
 from numpy.typing import NDArray
 from modules.helpers import norm_hairer
 from modules.step_control import (
-    get_PI_parameters,
-    StepController,
-    get_PI_parameters_rejected,
+    get_default_PI_parameters,
+    StepControllerPI,
+    get_default_PI_parameters_rejected,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,12 +30,12 @@ def DP45(
         n_restarts=0,
     )
     if "control_params" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params"] = get_PI_parameters(4)
+        step_controller_kwargs["control_params"] = get_default_PI_parameters(4)
     if "control_params_rejected" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params_rejected"] = get_PI_parameters_rejected(
-            4
+        step_controller_kwargs["control_params_rejected"] = (
+            get_default_PI_parameters_rejected(4)
         )
-    step_controller = StepController(**step_controller_kwargs)
+    step_controller = StepControllerPI(**step_controller_kwargs)
 
     if h0 is None:
         h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=4)
@@ -140,12 +140,12 @@ def BS23(
     )
 
     if "control_params" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params"] = get_PI_parameters(4)
+        step_controller_kwargs["control_params"] = get_default_PI_parameters(4)
     if "control_params_rejected" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params_rejected"] = get_PI_parameters_rejected(
-            4
+        step_controller_kwargs["control_params_rejected"] = (
+            get_default_PI_parameters_rejected(4)
         )
-    step_controller = StepController(**step_controller_kwargs)
+    step_controller = StepControllerPI(**step_controller_kwargs)
 
     if h0 is None:
         h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=2)

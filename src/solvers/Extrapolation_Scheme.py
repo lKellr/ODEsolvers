@@ -3,16 +3,12 @@ from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 import logging
-from helpers import norm_hairer
 
 from scipy.linalg import lu_factor, lu_solve
 
-from modules.helpers import numerical_jacobian
-from modules.step_control import (
-    get_PI_parameters,
-    StepController,
-    get_PI_parameters_rejected,
-)
+from modules import step_control
+from modules.helpers import clip, numerical_jacobian, norm_hairer, numerical_jacobian_t
+from modules.step_control import StepControllerExtrapKH, tab_state_type
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +18,7 @@ class Extrapolation_Solver(ABC):
         self,
         step_seq: NDArray[np.integer],
         is_symmetric: bool,
-        base_order: int,
+        is_implicit: bool,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
         num_odes: int,
         jac_fun: (
@@ -31,15 +27,13 @@ class Extrapolation_Solver(ABC):
         mass_matrix: NDArray[np.floating] | None = None,
         restart_step_multiplier: float = 0.5,
         table_size: int = 8,
-        **step_controller_kwargs: dict[str, Any]
+        step_controller: StepController = StepControllerExtrapKH(table_size, step_seq),
     ):
-        # self.restart_step_multiplier = restart_step_multiplier
-
         self.table_size: int = table_size
         self.num_odes = num_odes
         self.ode_fun = ode_fun
         if jac_fun is None:
-            self.jac_fun = lambda t, x: numerical_jacobian(t, x, ode_fun, delta=1e-8)
+            self.jac_fun = lambda x, t: numerical_jacobian_t(x, t, ode_fun, delta=1e-8)
         else:
             self.jac_fun = jac_fun
 
@@ -48,6 +42,7 @@ class Extrapolation_Solver(ABC):
         )
 
         self.is_symmetric = is_symmetric
+        self.is_implicit = is_implicit
         # self.base_order = base_order
         self.step_seq = step_seq
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
@@ -58,32 +53,23 @@ class Extrapolation_Solver(ABC):
                         (
                             (
                                 1.0
-                                / (self.step_seq[j - 1] / self.step_seq[j - k - 1])
+                                / (self.step_seq[j] / self.step_seq[j - k])
                                 ** (2.0 if is_symmetric else 1.0)
                                 - 1.0
                             )
-                            if k <= j + 1
+                            if k <= j - 1
                             else 0.0
                         )
-                        for k in range(1, table_size)
+                        for k in range(table_size - 1)
                     ]
                 )
-                for j in range(1, table_size)
+                for j in range(table_size - 1)
             ]
         )
-        self.fevals_per_step = self.step_seq + (
-                1 if self.is_symmetric else 0
-            )  # might not be correct for SODEX
-        total_fevals_per_step = np.cumsum([self.fevals_per_step]*(table_size-1))
-        self.feval_ratios = np.array([total_fevals_per_step[i+1]/total_fevals_per_step[i] for i in range(len(total_fevals_per_step)-1)])
 
-        if "control_params" not in step_controller_kwargs.keys():
-            step_controller_kwargs["control_params"] = get_PI_parameters(4)
-        if "control_params_rejected" not in step_controller_kwargs.keys():
-            step_controller_kwargs["control_params_rejected"] = get_PI_parameters_rejected(
-                4
-            )
-        step_controller = StepController(**step_controller_kwargs | dict(atol = 1e-11, rtol = 1e-5)) # addition of default values
+        self.step_controller = StepControllerExtrapKH(
+            table_size, step_seq, **step_controller_kwargs
+        )
 
     @abstractmethod
     def base_scheme(
@@ -111,41 +97,51 @@ class Extrapolation_Solver(ABC):
             T_coarselow = T_table_k[col]
             T_finelow = T_extrap
             T_extrap = (
-                T_finelow + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns, col]
+                T_finelow
+                + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns, col]
             )
             T_table_k[col] = T_finelow
         T_table_k[n_columns] = T_extrap
 
     def extrapolation_step(
-        self, t_prev: float, x_prev: NDArray[np.floating], step_size: float, k_target: float
-    ) -> tuple[NDArray[np.floating], dict[str, Any]]:
-        """Performs an extrapolation step of U0 until t + step_size.
-        Repeated extrapolation until the target tolerance is met."""
-        err = np.empty_like(x_prev)
-        err_prev = np.empty_like(x_prev)  # required for overflow remedy
+        self,
+        t_curr: float,
+        x_curr: NDArray[np.floating],
+        k_target: int,
+        step_size: float,
+        is_first_step: bool = False,
+    ) -> tuple[NDArray[np.floating], int, float, bool, dict[str, Any]]:
+        """Performs an extrapolation step of U0 until t + step_size"""
+        err = np.empty_like(x_curr)
+        err_prev = np.empty_like(x_curr)  # required for overflow remedy
 
+        step_info: dict[str, Any] = dict(
+            n_feval=0,
+            n_jaceval=0,
+            n_lu=0,
+            local_error=np.nan,
+            max_substeps=np.nan,
+        )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
-        jac0 = self.jac_fun(t_prev, x_prev)
+        jac0 = self.jac_fun(t_curr, x_curr)
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
         T_table_k = np.empty((self.table_size, self.num_odes))
         T_table_k[0] = self.base_scheme(
-            x_prev, t_prev, t_max=t_prev + step_size, n_steps=self.step_seq[0], jac0=jac0
+            x_curr,
+            t_curr,
+            t_max=t_curr + step_size,
+            n_steps=self.step_seq[0],
+            jac0=jac0,
         )
 
-        step_info: dict[str, Any] = dict(
-            n_feval=self.step_seq[0] + (1 if self.is_symmetric else 0),
-            n_jaceval=1,
-            n_lu=1,
-            local_error=np.nan,
-            max_substeps=np.nan,
-        )
+        state: tab_state_type = "continue"
         iterator_table = 1
-        while True:
+        while state == "continue":
             # Basic operations: compute with more steps, then fill row in tableau
             T_fine_first_order = self.base_scheme(
-                x_prev,
-                t_prev,
+                x_curr,
+                t_curr,
                 t_max=step_size,
                 n_steps=self.step_seq[iterator_table],
                 jac0=jac0,
@@ -154,51 +150,52 @@ class Extrapolation_Solver(ABC):
             err_prev = err
             err = np.abs(T_table_k[iterator_table - 1] - T_table_k[iterator_table])
 
-            step_info["n_feval"] += self.fevals_per_step[iterator_table]
-            step_info["n_lu"] += 1
-            logger.debug(
-                f"Stage reached: {iterator_table}, error: {err}"
-            )  # might be wrong for symmetric methods
+            logger.debug(f"Stage reached: {iterator_table}, error: {err}")
 
             # exit conditions
-            if(iterator_table == iterator_target-1) # TODO: greater equal?, why can i not check this earlier?
-                tol = self.atol + self.rtol * np.maximum(np.abs(x_prev), np.abs(T_table_k[iterator_table]))
-                err_ratio = np.linalg.norm(err/tol, ord=np.inf) # alternative: norm_hairer
-                step_opt, step_opt_prev, work_per_step, work_per_step_prev
-                if(err_ratio < 1): # a) Convergence in line k − 1
-                    if work_per_step < 0.9*work_per_step_prev:
-                        iterator_target = iterator_target
-                        step = step_opt_prev*self.feval_ratio[k]
-                    else:
-                    iterator_target =iterator_table
-                    step = 
-                    step_info["exit_status"] = "Success"
-                    logger.debug("Success: Tolerance reached in line k-1")
-                    break
-            else: # b) Convergence monitor: do we expect convergence in later steps?
+            if iterator_table >= k_target - 1 or is_first_step:
+                next_k, next_step_mult, state = self.step_controller.evaluate_step(
+                    iterator_table,
+                    k_target,
+                    err,
+                    x_curr,
+                    T_table_k[iterator_table],
+                )
 
-
-            elif iterator_table >= 2 and np.any(
-                err >= err_prev
-            ):  # Hairer & Wanner overflow remedy a)
-            # TODO: this does not work since the step sizes are then not working any more
-                    step_size *= self.restart_step_multiplier
-                step_info["exit_status"] = "divergence"
-                logger.debug(f"Restarting with step = {step_size} due to divergence")
-                break
-            elif iterator_table >= self.table_size - 2:
-                step_info["exit_status"] = "Failure: Maximum order reached"
-                logger.debug(msg="Failure: Maximum order reached")
-                break
+            # divergence monitor, TODO: only required for implicit methods
+            if (
+                self.is_implicit and iterator_table >= 2 and np.any(err >= err_prev)
+            ):  # Hairer & Wanner divergence monitor a)
+                step_size *= self.step_controller.step_multiplier_divergence
+                state = "retry"
 
             iterator_table += 1
 
+        step_info["stop_reason"] = (  # TODO:distinguish slow convergence and divergence
+            "success" if state == "accepted" else "nonconvergence"
+        )
+        logger.debug(step_info["stop_reason"])
+        step_info["n_feval"] = np.cumsum(self.step_seq + self.is_symmetric)[
+            iterator_table - 1
+        ]  # TODO: check this
+        step_info["n_lu"] = iterator_table
+        step_info["n_jaceval"] = 1
         step_info["local_error"] = err
         step_info["max_substeps"] = self.step_seq[iterator_table]
-        return T_table_k[iterator_table], step_info
+        return (
+            T_table_k[iterator_table],
+            next_k,
+            next_step_mult * step_size,
+            accepted,
+            step_info,
+        )
 
     def solve(
-        self, U0: NDArray[np.floating], t_max: float, t0: float = 0, step0: float | None = None,
+        self,
+        U0: NDArray[np.floating],
+        t_max: float,
+        t0: float = 0,
+        params_step0: tuple[int, float] | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
 
         solve_info: dict[str, Any] = dict(
@@ -208,25 +205,35 @@ class Extrapolation_Solver(ABC):
             n_restarts=0,
         )
 
+        k_target: int
         step: float
-        if step0 is None:
-            step = self.step_controller.get_initial_stepHW(self.ode_fun, U0, t0=t0, p=4)
+        if params_step0 is None:
+            k_target = self.step_controller.get_initial_ktarget()
+            step = self.step_controller.get_initial_stepHW(
+                self.ode_fun, U0, t0=t0, p=k_target
+            )
         else:
-            step = step0
+            k_target = params_step0[0]
+            step = params_step0[1]
 
         time = [t0]
         solution = [U0]
 
-
         current_time = t0
         while current_time < t_max:
-            if current_time + step > t_max:  # shorten h if we would go further than necessary
+            if (
+                current_time + step > t_max
+            ):  # shorten h if we would go further than necessary
                 step = t_max - current_time
             logger.debug(f"Starting step at time {current_time} of {t_max}")
 
             # do step
-            new_solution, step_info = self.extrapolation_step(
-                current_time, solution[-1], step
+            new_solution, k_target, step, accepted, step_info = self.extrapolation_step(
+                current_time,
+                solution[-1],
+                k_target,
+                step,
+                is_first_step=(current_time == t0),
             )
             # info
             solve_info["n_feval"] += step_info["n_feval"]
@@ -238,17 +245,13 @@ class Extrapolation_Solver(ABC):
                 + "\n"
             )
 
-            # find optimal step size
-            step, accepted = self.step_controller.evaluate_step(tried_step_size=step, err, x[ix_step], x_pred)
-            step = 0.94 * (0.65/err_ratio)**(1/(2*k-1)) # TODO: is this correct also for SEULEX?
-
             if accepted:
                 solution.append(new_solution)
                 time.append(current_time)
                 current_time += step
             else:
-                logger.debug(f"Retrying step with h={step}")
-            
+                logger.debug(f"Retrying step with h = {step}")
+
         # finished
         logger.debug(
             "Finished\n"
@@ -277,12 +280,10 @@ class EULEX(Extrapolation_Solver):
         super().__init__(
             step_seq=step_seq,
             is_symmetric=False,
-            base_order=1,
+            is_implicit=False,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
-            atol=atol,
-            rtol=rtol,
             table_size=table_size,
         )
 
@@ -295,10 +296,11 @@ class EULEX(Extrapolation_Solver):
         U_n = U0
         t_n = t0
         for _ in range(n_steps):
-            delta_U = self.inv_mass_matrix*(delta_t * self.ode_fun(t_n, U_n))
+            delta_U = self.inv_mass_matrix * (delta_t * self.ode_fun(t_n, U_n))
             U_n = U_n + delta_U
             t_n += delta_t
         return U_n
+
 
 class ODEX(Extrapolation_Solver):
     def __init__(
@@ -335,15 +337,18 @@ class ODEX(Extrapolation_Solver):
 
         # t_n = t0
         U_2prev = U0
-        U_n = U0 + delta_t*self.inv_mass_matrix*(delta_t * self.ode_fun(t0, U0)) # start with an Euler step
+        U_n = U0 + delta_t * self.inv_mass_matrix * (
+            delta_t * self.ode_fun(t0, U0)
+        )  # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
-            delta_U = self.inv_mass_matrix*(2*delta_t * self.ode_fun(t_n, U_n))
+            delta_U = self.inv_mass_matrix * (2 * delta_t * self.ode_fun(t_n, U_n))
             U_temp = U_n
             U_n = U_2prev + delta_U
             t_n += delta_t
             U_2prev = U_temp
         return U_n
+
 
 class SEULEX(Extrapolation_Solver):
     def __init__(
@@ -389,9 +394,10 @@ class SEULEX(Extrapolation_Solver):
             delta_U = lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
             U_n = U_n + delta_U
             t_n += delta_t
-            # if i == 1 and (delta_U > delta_U_prev): # TODO: delta_U_prev from Newton iteration!
+            # if n_steps == (2 or 3) and (delta_U >= delta_U_prev):
             #     # TODO: restart
             #     # TODO: thius should be chaked in the base class
+            # delta_U_prev = delta_U
         return U_n
 
 
@@ -400,15 +406,17 @@ class SODEX(Extrapolation_Solver):
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
         num_odes: int,
-        jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None = None,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
         mass_matrix: NDArray[np.floating] | None = None,
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
     ):
 
-        step_seq = np.array([2, 6, 10, 14, 22, 34, 50])  
-        assert (step_seq%2==0).all(), "Number of steps for SODEX must be even"
+        step_seq = np.array([2, 6, 10, 14, 22, 34, 50])
+        assert (step_seq % 2 == 0).all(), "Number of steps for SODEX must be even"
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
@@ -433,18 +441,20 @@ class SODEX(Extrapolation_Solver):
         t_n = t0 + delta_t
 
         # continue with linearly implicit midpoint
-        for _ in range(1,n_steps):
-            rhs = 2*delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix*delta_U)
-            delta_U = delta_U + lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
+        for _ in range(1, n_steps):
+            rhs = 2 * delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix * delta_U)
+            delta_U = delta_U + lu_solve(
+                (lu, piv), rhs, overwrite_b=True, check_finite=False
+            )
             U_n = U_n + delta_U
-            t_n += 2*delta_t
+            t_n += 2 * delta_t
         # Gragg's smoothing, requires one additional step before which we save the previous value of U
         U_fprev = U_n - delta_U
-        rhs = 2*delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix*delta_U)
-        delta_U = delta_U + lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
+        rhs = 2 * delta_t * (self.ode_fun(t_n, U_n) - self.mass_matrix * delta_U)
+        delta_U = delta_U + lu_solve(
+            (lu, piv), rhs, overwrite_b=True, check_finite=False
+        )
         U_n = U_n + delta_U
         Sh_n = 0.5 * (U_nprev + U_n)
 
         return Sh_n
-
-

@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from modules.step_control import ControllerParams
+from modules.step_control import ControllerPIParams
 from solvers.embedded import *
 from solvers.explicit import *
 import logging
@@ -55,7 +55,7 @@ results["DP45_strict"] = DP45(
     h_limits=(1e-16, np.inf),
     atol=1e-8,
     rtol=1e-6,
-    control_params=ControllerParams(
+    control_params=ControllerPIParams(
         coeff_i=1.0 / 4.0, coeff_p=0.0, s_limits=(0.2, 5.0)
     ),
 )
@@ -66,13 +66,11 @@ results["DP45_I"] = DP45(
     h_limits=(1e-16, np.inf),
     atol=1e-5,
     rtol=1e-3,
-    control_params=ControllerParams(
+    control_params=ControllerPIParams(
         coeff_i=1.0 / 4.0, coeff_p=0.0, s_limits=(0.2, 5.0)
     ),
 )
-results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(
-    results["DP45"][0]
-))
+results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(results["DP45"][0]))
 
 
 # results
