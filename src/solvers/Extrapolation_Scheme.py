@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, override
 from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
@@ -8,7 +8,11 @@ from scipy.linalg import lu_factor, lu_solve
 
 from modules import step_control
 from modules.helpers import clip, numerical_jacobian, norm_hairer, numerical_jacobian_t
-from modules.step_control import StepControllerExtrapKH, tab_state_type
+from modules.step_control import (
+    StepControllerExtrap,
+    StepControllerExtrapKH,
+    tab_state_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +28,14 @@ class Extrapolation_Solver(ABC):
         jac_fun: (
             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
         ) = None,
-        mass_matrix: NDArray[np.floating] | None = None,
-        restart_step_multiplier: float = 0.5,
         table_size: int = 8,
-        step_controller: StepController | None = StepControllerExtrapKH(
-            table_size, step_seq
-        ),
+        mass_matrix: NDArray[np.floating] | None = None,
+        step_controller: StepControllerExtrap | None = None,
+        dtype: np.floating = np.double,
     ):
         self.table_size: int = table_size
         self.num_odes = num_odes
+        self.dtype = dtype
         self.ode_fun = ode_fun
         if jac_fun is None:
             self.jac_fun = lambda x, t: numerical_jacobian_t(x, t, ode_fun, delta=1e-8)
@@ -40,7 +43,7 @@ class Extrapolation_Solver(ABC):
             self.jac_fun = jac_fun
 
         self.mass_matrix = (
-            mass_matrix if mass_matrix is not None else np.identity(num_odes)
+            mass_matrix if mass_matrix is not None else np.identity(num_odes, dtype)
         )
 
         self.is_symmetric = is_symmetric
@@ -50,28 +53,28 @@ class Extrapolation_Solver(ABC):
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
         self.coeffs_Aitken = np.array(
             [
-                np.array(
-                    [
+                [
+                    (
                         (
-                            (
-                                1.0
-                                / (self.step_seq[j] / self.step_seq[j - k])
-                                ** (2.0 if is_symmetric else 1.0)
-                                - 1.0
-                            )
-                            if k <= j - 1
-                            else 0.0
+                            1.0
+                            / (self.step_seq[j] / self.step_seq[j - k])
+                            ** (2.0 if is_symmetric else 1.0)
+                            - 1.0
                         )
-                        for k in range(table_size - 1)
-                    ]
-                )
+                        if k <= j - 1
+                        else 0.0
+                    )
+                    for k in range(table_size - 1)
+                ]
                 for j in range(table_size - 1)
-            ]
+            ],
+            dtype,
         )
 
-        self.step_controller = StepControllerExtrapKH(
-            table_size, step_seq, **step_controller_kwargs
-        )
+        if step_controller is None:
+            self.step_controller = StepControllerExtrapKH(table_size, step_seq)
+        else:
+            self.step_controller = step_controller
 
     @abstractmethod
     def base_scheme(
@@ -111,7 +114,7 @@ class Extrapolation_Solver(ABC):
         x_curr: NDArray[np.floating],
         k_target: int,
         step_size: float,
-        is_first_step: bool = False,
+        allow_full_order_variation: bool = False,
     ) -> tuple[NDArray[np.floating], int, float, bool, dict[str, Any]]:
         """Performs an extrapolation step of U0 until t + step_size"""
         err = np.empty_like(x_curr)
@@ -125,10 +128,10 @@ class Extrapolation_Solver(ABC):
             max_substeps=np.nan,
         )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
-        jac0 = self.jac_fun(t_curr, x_curr)
+        jac0 = self.jac_fun(t_curr, x_curr.astype(self.dtype))
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
-        T_table_k = np.empty((self.table_size, self.num_odes))
+        T_table_k = np.empty((self.table_size, self.num_odes), self.dtype)
         T_table_k[0] = self.base_scheme(
             x_curr,
             t_curr,
@@ -138,6 +141,8 @@ class Extrapolation_Solver(ABC):
         )
 
         state: tab_state_type = "continue"
+        next_k = -1
+        next_step_mult = -1.0
         iterator_table = 1
         while state == "continue":
             # Basic operations: compute with more steps, then fill row in tableau
@@ -155,7 +160,7 @@ class Extrapolation_Solver(ABC):
             logger.debug(f"Stage reached: {iterator_table}, error: {err}")
 
             # exit conditions
-            if iterator_table >= k_target - 1 or is_first_step:
+            if iterator_table >= k_target - 1 or allow_full_order_variation:
                 next_k, next_step_mult, state = self.step_controller.evaluate_step(
                     iterator_table,
                     k_target,
@@ -169,6 +174,7 @@ class Extrapolation_Solver(ABC):
                 self.is_implicit and iterator_table >= 2 and np.any(err >= err_prev)
             ):  # Hairer & Wanner divergence monitor a)
                 step_size *= self.step_controller.step_multiplier_divergence
+                self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
                 state = "retry"
 
             iterator_table += 1
@@ -188,7 +194,7 @@ class Extrapolation_Solver(ABC):
             T_table_k[iterator_table],
             next_k,
             next_step_mult * step_size,
-            accepted,
+            state == "accepted",
             step_info,
         )
 
@@ -235,7 +241,10 @@ class Extrapolation_Solver(ABC):
                 solution[-1],
                 k_target,
                 step,
-                is_first_step=(current_time == t0),
+                allow_full_order_variation=(current_time <= t0)
+                or (
+                    current_time + step >= t_max
+                ),  # allow quick order variation for first and last steps when target order is not optimal
             )
             # info
             solve_info["n_feval"] += step_info["n_feval"]
@@ -261,7 +270,7 @@ class Extrapolation_Solver(ABC):
             + "\n"
         )
 
-        return np.array(time), np.array(solution), solve_info
+        return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
 
 class EULEX(Extrapolation_Solver):
@@ -276,8 +285,10 @@ class EULEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
+        step_seq: NDArray[np.integer] | None = None,
     ):
-        step_seq = np.array(range(1, table_size + 1))  # Harmonic
+        if step_seq is None:
+            step_seq = np.array(range(1, table_size + 1))  # Harmonic
 
         super().__init__(
             step_seq=step_seq,
@@ -287,8 +298,12 @@ class EULEX(Extrapolation_Solver):
             num_odes=num_odes,
             jac_fun=jac_fun,
             table_size=table_size,
+            mass_matrix=mass_matrix,
+            step_controller=step_controller,
+            dtype=dtype,
         )
 
+    @override
     def base_scheme(
         self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
     ) -> NDArray[np.floating]:
@@ -316,23 +331,32 @@ class ODEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
+        step_seq: NDArray[np.integer] | None = None,
     ):
-        step_seq = np.array(range(1, table_size + 1))  # Harmonic
+        if step_seq is None:
+            step_seq = np.array(range(1, table_size + 1))  # Harmonic
 
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
-            base_order=1,
+            is_implicit=False,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
-            atol=atol,
-            rtol=rtol,
             table_size=table_size,
+            mass_matrix=mass_matrix,
+            step_controller=step_controller,
+            dtype=dtype,
         )
 
+    @override
     def base_scheme(
-        self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating],
     ) -> NDArray[np.floating]:
         r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
         delta_t = (t_max - t0) / n_steps
@@ -364,26 +388,33 @@ class SEULEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
+        step_seq: NDArray[np.integer] | None = None,
     ):
-
-        step_seq = np.array(range(2, table_size + 2))
+        if step_seq is None:
+            step_seq = np.array(range(2, table_size + 2))
         # step_seq = np.array(range(1, table_size + 1))  # Harmonic
         # step_seq = np.array([i**2 for i in range(table_size + 1)]) # Romberg
-        # self.base_scheme = self.seuler0
         super().__init__(
             step_seq=step_seq,
             is_symmetric=False,
-            base_order=1,
+            is_implicit=True,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
-            atol=atol,
-            rtol=rtol,
             table_size=table_size,
+            mass_matrix=mass_matrix,
+            step_controller=step_controller,
+            dtype=dtype,
         )
 
+    @override
     def base_scheme(
-        self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating],
     ) -> NDArray[np.floating]:
         r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
         delta_t = (t_max - t0) / n_steps
@@ -415,24 +446,34 @@ class SODEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
+        step_seq: NDArray[np.integer] | None = None,
     ):
-
-        step_seq = np.array([2, 6, 10, 14, 22, 34, 50])
-        assert (step_seq % 2 == 0).all(), "Number of steps for SODEX must be even"
+        if step_seq is None:
+            step_seq = np.array([2, 6, 10, 14, 22, 34, 50])
+        else:
+            assert (step_seq % 2 == 0).all(), "Number of steps for SODEX must be even"
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
+            is_implicit=True,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
-            atol=atol,
-            rtol=rtol,
             table_size=table_size,
+            mass_matrix=mass_matrix,
+            step_controller=step_controller,
+            dtype=dtype,
         )
 
+    @override
     def base_scheme(
-        self, U0: NDArray, t0: float, t_max: float, n_steps: int, jac0
-    ) -> NDArray:
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating],
+    ) -> NDArray[np.floating]:
         delta_t = (t_max - t0) / n_steps
         lu, piv = lu_factor(self.mass_matrix - delta_t * jac0)
 

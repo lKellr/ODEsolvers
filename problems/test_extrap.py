@@ -42,9 +42,13 @@ results["AB_6"] = AB_k(x_dot, x0, t_max, h, k=6)
 
 solver_eulex = EULEX(x_dot, x0.size, table_size=8)
 results["EULEX"] = solver_eulex.solve(x0, t_max)
-solver_eulex_step = EULEX(x_dot, x0.size, table_size=8, StepControllerExtrapK())
+solver_eulex_step = EULEX(
+    x_dot, x0.size, table_size=8, step_controller=StepControllerExtrapK()
+)
 results["EULEX_const_step"] = solver_eulex.solve(x0, t_max)
-solver_eulex_ord = EULEX(x_dot, x0.size, table_size=8, StepControllerExtrapH())
+solver_eulex_ord = EULEX(
+    x_dot, x0.size, table_size=8, step_controller=StepControllerExtrapH()
+)
 results["EULEX_const_ord"] = solver_eulex.solve(x0, t_max)
 solver_odex = ODEX(x_dot, x0.size, table_size=8)
 results["ODEX"] = solver_odex.solve(x0, t_max)
