@@ -42,8 +42,8 @@ def numerical_jacobian(
 
 
 def numerical_jacobian_t(
-    x: NDArray[np.floating],
     t: float,
+    x: NDArray[np.floating],
     f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     delta: float,
 ) -> NDArray[np.floating]:

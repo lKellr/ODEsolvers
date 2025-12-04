@@ -1,4 +1,4 @@
-from typing import Any, Callable, override
+from typing import Any, Callable, Literal, override
 from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
@@ -9,6 +9,7 @@ from scipy.linalg import lu_factor, lu_solve
 from modules import step_control
 from modules.helpers import clip, numerical_jacobian, norm_hairer, numerical_jacobian_t
 from modules.step_control import (
+    ImplicitRelCosts,
     StepControllerExtrap,
     StepControllerExtrapKH,
     tab_state_type,
@@ -20,25 +21,56 @@ logger = logging.getLogger(__name__)
 class Extrapolation_Solver(ABC):
     def __init__(
         self,
-        step_seq: NDArray[np.integer],
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ),
         is_symmetric: bool,
         is_implicit: bool,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
         num_odes: int,
-        jac_fun: (
-            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
-        ) = None,
-        table_size: int = 8,
-        mass_matrix: NDArray[np.floating] | None = None,
-        step_controller: StepControllerExtrap | None = None,
+        jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
+        table_size: int,
+        fevals_per_step: (
+            NDArray[np.integer] | None
+        ),  # most of the time = step_seq, possible one more (Gragg smoothing) for symmetric methods
+        mass_matrix: NDArray[np.floating] | None,
+        step_controller: StepControllerExtrap | None,
         dtype: np.floating = np.double,
     ):
+        if step_seq == "harmonic":
+            step_seq = np.array(range(1, table_size + 1))
+        elif step_seq == "Romberg":
+            step_seq = np.array([i**2 for i in range(table_size + 1)])
+        elif step_seq == "Bulirsch":
+            step_seq = np.array(
+                [
+                    2 ** (k // 2) if k == 1 or k % 2 == 0 else 1.5 * 2 ** (k // 2)
+                    for k in range(1, table_size + 1)
+                ]
+            )
+        elif step_seq == "harmonic2":
+            step_seq = np.array(range(2, table_size + 2))
+        elif (
+            step_seq == "fours"
+        ):  # this sequence would allow for dense output, form Numerical Recipes
+            step_seq = np.array(range(2, 4 * table_size, 4))
+        elif step_seq == "SODEX":
+            assert (
+                table_size <= 7
+            ), "table sizes larger than 7 are not implemented when using the step sequence SODEX"
+            step_seq = np.array(
+                [2, 6, 10, 14, 22, 34, 50][:table_size]
+            )  # NOTE: i am not sure if a formula exists for these; they have to be multiples of even numbers, according to Bader&Deulfhard1983, the ratio iof subsequent entries must lie between 1 and 5/7
+        else:
+            raise ValueError(f"step sequence of type {step_seq} is not available.")
+
         self.table_size: int = table_size
         self.num_odes = num_odes
         self.dtype = dtype
         self.ode_fun = ode_fun
         if jac_fun is None:
-            self.jac_fun = lambda x, t: numerical_jacobian_t(x, t, ode_fun, delta=1e-8)
+            self.jac_fun = lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
         else:
             self.jac_fun = jac_fun
 
@@ -71,8 +103,31 @@ class Extrapolation_Solver(ABC):
             dtype,
         )
 
+        if fevals_per_step is None:
+            fevals_per_step = step_seq  # + is_symmetric # symmetric methods usually use Gragg smoothing
+        self.fevals_per_step = fevals_per_step
+
         if step_controller is None:
-            self.step_controller = StepControllerExtrapKH(table_size, step_seq)
+            implicit_rel_costs = None
+            if self.is_implicit:
+                implicit_rel_costs = ImplicitRelCosts(  # TODO: tune these
+                    rel_jac_cost=self.num_odes + 1,
+                    rel_lu_cost=1.0,
+                    rel_backsub_cost=0.0,
+                )
+            elif mass_matrix is not None:
+                implicit_rel_costs = ImplicitRelCosts(
+                    rel_jac_cost=0.0, rel_lu_cost=1.0, rel_backsub_cost=0.0
+                )
+
+            self.step_controller = StepControllerExtrapKH(
+                table_size,
+                step_seq,
+                is_symmetric,
+                fevals_per_step,
+                dtype,
+                implicit_rel_costs=implicit_rel_costs,
+            )
         else:
             self.step_controller = step_controller
 
@@ -83,7 +138,7 @@ class Extrapolation_Solver(ABC):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating],
+        jac0: NDArray[np.floating] | None,
     ) -> NDArray[np.floating]:
         raise NotImplementedError()
 
@@ -128,7 +183,9 @@ class Extrapolation_Solver(ABC):
             max_substeps=np.nan,
         )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
-        jac0 = self.jac_fun(t_curr, x_curr.astype(self.dtype))
+        jac0 = None
+        if self.is_implicit:
+            jac0 = self.jac_fun(t_curr, x_curr.astype(self.dtype))
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
         T_table_k = np.empty((self.table_size, self.num_odes), self.dtype)
@@ -143,8 +200,9 @@ class Extrapolation_Solver(ABC):
         state: tab_state_type = "continue"
         next_k = -1
         next_step_mult = -1.0
-        iterator_table = 1
+        iterator_table = 0
         while state == "continue":
+            iterator_table += 1
             # Basic operations: compute with more steps, then fill row in tableau
             T_fine_first_order = self.base_scheme(
                 x_curr,
@@ -173,19 +231,18 @@ class Extrapolation_Solver(ABC):
             if (
                 self.is_implicit and iterator_table >= 2 and np.any(err >= err_prev)
             ):  # Hairer & Wanner divergence monitor a)
-                step_size *= self.step_controller.step_multiplier_divergence
+                next_k = k_target  # not sure if this is the correct way to do this, maybe k should even be decreased?
+                next_step_mult = self.step_controller.step_multiplier_divergence
                 self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
                 state = "retry"
-
-            iterator_table += 1
 
         step_info["stop_reason"] = (  # TODO:distinguish slow convergence and divergence
             "success" if state == "accepted" else "nonconvergence"
         )
         logger.debug(step_info["stop_reason"])
-        step_info["n_feval"] = np.cumsum(self.step_seq + self.is_symmetric)[
-            iterator_table - 1
-        ]  # TODO: check this
+        step_info["n_feval"] = np.sum(
+            self.fevals_per_step[: iterator_table + 1]
+        )  # TODO: check this
         step_info["n_lu"] = iterator_table
         step_info["n_jaceval"] = 1
         step_info["local_error"] = err
@@ -285,15 +342,23 @@ class EULEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
-        step_seq: NDArray[np.integer] | None = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        step_controller: StepControllerExtrap | None = None,
+        dtype: np.floating = np.double,
     ):
-        if step_seq is None:
-            step_seq = np.array(range(1, table_size + 1))  # Harmonic
+
+        if mass_matrix is not None:
+            self.lu_and_piv_mass = lu_factor(self.mass_matrix)
+            self.base_scheme = self.base_scheme_mass  # TODO: this is dangerous
 
         super().__init__(
             step_seq=step_seq,
             is_symmetric=False,
             is_implicit=False,
+            fevals_per_step=step_seq,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
@@ -305,15 +370,42 @@ class EULEX(Extrapolation_Solver):
 
     @override
     def base_scheme(
-        self, U0: NDArray[np.floating], t0: float, t_max: float, n_steps: int, jac0
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
     ) -> NDArray[np.floating]:
-        r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
         delta_t = (t_max - t0) / n_steps
 
         U_n = U0
         t_n = t0
         for _ in range(n_steps):
-            delta_U = self.inv_mass_matrix * (delta_t * self.ode_fun(t_n, U_n))
+            delta_U = delta_t * self.ode_fun(t_n, U_n)
+            U_n = U_n + delta_U
+            t_n += delta_t
+        return U_n
+
+    def base_scheme_mass(
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> NDArray[np.floating]:
+        delta_t = (t_max - t0) / n_steps
+
+        U_n = U0
+        t_n = t0
+        for _ in range(n_steps):
+            delta_U = lu_solve(
+                self.lu_and_piv_mass,
+                delta_t * self.ode_fun(t_n, U_n),
+                overwrite_b=True,
+                check_finite=False,
+            )
             U_n = U_n + delta_U
             t_n += delta_t
         return U_n
@@ -331,15 +423,23 @@ class ODEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
-        step_seq: NDArray[np.integer] | None = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        step_controller: StepControllerExtrap | None = None,
+        dtype: np.floating = np.double,
     ):
-        if step_seq is None:
-            step_seq = np.array(range(1, table_size + 1))  # Harmonic
+
+        if mass_matrix is not None:
+            self.lu_and_piv_mass = lu_factor(self.mass_matrix)
+            self.base_scheme = self.base_scheme_mass  # TODO: this is dangerous
 
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
             is_implicit=False,
+            fevals_per_step=step_seq,  # TODO: Gragg smoothing?
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
@@ -356,19 +456,53 @@ class ODEX(Extrapolation_Solver):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating],
+        jac0: NDArray[np.floating] | None = None,
     ) -> NDArray[np.floating]:
-        r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) U^{n+1} = \Delta t f(U^n) with a constant jacobian evaluated at U0"""
         delta_t = (t_max - t0) / n_steps
+
+        # TODO: Gragg smoothing?
 
         # t_n = t0
         U_2prev = U0
-        U_n = U0 + delta_t * self.inv_mass_matrix * (
-            delta_t * self.ode_fun(t0, U0)
-        )  # start with an Euler step
+        U_n = U0 + delta_t * self.ode_fun(t0, U0)  # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
-            delta_U = self.inv_mass_matrix * (2 * delta_t * self.ode_fun(t_n, U_n))
+            delta_U = 2 * delta_t * self.ode_fun(t_n, U_n)
+            U_temp = U_n
+            U_n = U_2prev + delta_U
+            t_n += delta_t
+            U_2prev = U_temp
+        return U_n
+
+    def base_scheme_mass(
+        self,
+        U0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> NDArray[np.floating]:
+        delta_t = (t_max - t0) / n_steps
+
+        # TODO: Gragg smoothing?
+
+        # t_n = t0
+        U_2prev = U0
+        U_n = U0 + lu_solve(
+            self.lu_and_piv_mass,
+            delta_t * self.ode_fun(t0, U0),
+            overwrite_b=True,
+            check_finite=False,
+        )  # start with an Euler step
+
+        t_n = t0 + delta_t
+        for _ in range(1, n_steps):
+            delta_U = lu_solve(
+                self.lu_and_piv_mass,
+                2 * delta_t * self.ode_fun(t_n, U_n),
+                overwrite_b=True,
+                check_finite=False,
+            )
             U_temp = U_n
             U_n = U_2prev + delta_U
             t_n += delta_t
@@ -388,16 +522,19 @@ class SEULEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
-        step_seq: NDArray[np.integer] | None = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic2",
+        step_controller: StepControllerExtrap | None = None,
+        dtype: np.floating = np.double,
     ):
-        if step_seq is None:
-            step_seq = np.array(range(2, table_size + 2))
-        # step_seq = np.array(range(1, table_size + 1))  # Harmonic
-        # step_seq = np.array([i**2 for i in range(table_size + 1)]) # Romberg
+
         super().__init__(
             step_seq=step_seq,
             is_symmetric=False,
             is_implicit=True,
+            fevals_per_step=step_seq,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,
@@ -446,16 +583,18 @@ class SODEX(Extrapolation_Solver):
         atol: float = 1e-11,
         rtol: float = 1e-5,
         table_size: int = 8,
-        step_seq: NDArray[np.integer] | None = None,
+        step_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
+        step_controller: StepControllerExtrap | None = None,
+        dtype: np.floating = np.double,
     ):
-        if step_seq is None:
-            step_seq = np.array([2, 6, 10, 14, 22, 34, 50])
-        else:
+        if isinstance(step_seq, np.ndarray):
             assert (step_seq % 2 == 0).all(), "Number of steps for SODEX must be even"
+
         super().__init__(
             step_seq=step_seq,
             is_symmetric=True,
             is_implicit=True,
+            fevals_per_step=step_seq + 1,
             ode_fun=ode_fun,
             num_odes=num_odes,
             jac_fun=jac_fun,

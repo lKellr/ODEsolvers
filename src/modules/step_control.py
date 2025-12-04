@@ -275,6 +275,8 @@ class StepControllerExtrapKH(StepControllerExtrap):
         self,
         table_size: int,
         step_seq: NDArray[np.integer],
+        is_symmetric: bool,
+        fevals_per_step: NDArray[np.integer] | None = None,
         dtype: np.floating = np.double,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
@@ -304,7 +306,9 @@ class StepControllerExtrapKH(StepControllerExtrap):
             ]
         )
 
-        self.total_feval_cost_at_kstep = np.cumsum(step_seq + is_symmetric)
+        if fevals_per_step is None:
+            fevals_per_step = step_seq
+        self.total_feval_cost_at_kstep = np.cumsum(fevals_per_step)
         if implicit_rel_costs is not None:
             self.total_feval_cost_at_kstep += np.cumsum(
                 implicit_rel_costs.rel_lu_cost
