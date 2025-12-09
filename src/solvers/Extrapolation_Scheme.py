@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from typing import Any, Callable, Literal, TypeVar, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -17,208 +18,9 @@ logger = logging.getLogger(__name__)
 tab_state_type = Literal["accepted", "continue", "too_slow_convergence", "divergence"]
 
 
-def euler(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating] | None = None,
-) -> tuple[NDArray[np.floating], bool]:
-    delta_t = (t_max - t0) / n_steps
-
-    x_n = x0
-    t_n = t0
-    for _ in range(n_steps):
-        delta_x = delta_t * ode_fun(t_n, x_n)
-        x_n = x_n + delta_x
-        t_n += delta_t
-    return x_n, False
-
-
-def euler_mass(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating] | None = None,
-) -> tuple[NDArray[np.floating], bool]:
-    delta_t = (t_max - t0) / n_steps
-
-    x_n = x0
-    t_n = t0
-    for _ in range(n_steps):
-        delta_x = lu_solve(
-            self.lu_and_piv_mass,
-            delta_t * ode_fun(t_n, x_n),
-            overwrite_b=True,
-            check_finite=False,
-        )
-        x_n = x_n + delta_x
-        t_n += delta_t
-    return x_n, False
-
-
-def modified_midpoint(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating] | None = None,
-    smoothing=False,
-) -> tuple[NDArray[np.floating], bool]:
-    """modified midpoint method with the posibility of Gragg's smoothing"""
-    delta_t = (t_max - t0) / n_steps
-    x_2prev = x0
-    x_prev = x0
-    x_n = x0 + delta_t * ode_fun(t0, x_prev)  # start with an Euler step
-    t_n = t0 + delta_t
-    for _ in range(1, n_steps):
-        x_prev = x_n
-        delta_x = 2 * delta_t * ode_fun(t_n, x_prev)
-        x_n = x_2prev + delta_x
-        x_2prev = x_prev
-        t_n += delta_t
-    if smoothing:
-        x_n = 0.5 * (x_n + x_prev + delta_t * ode_fun(t_n, x_n))
-    return x_n, False
-
-
-def modified_midpoint_mass(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating] | None = None,
-    smoothing=False,
-) -> tuple[NDArray[np.floating], bool]:
-    """modified midpoint method. This variant allows for the specification of a mass matrix"""
-    delta_t = (t_max - t0) / n_steps
-    x_2prev = x0
-    x_prev = x0
-    x_n = x0 + lu_solve(
-        self.lu_and_piv_mass,
-        delta_t * ode_fun(t0, x_prev),
-        overwrite_b=True,
-        check_finite=False,
-    )  # start with an Euler step
-
-    t_n = t0 + delta_t
-    for _ in range(1, n_steps):
-        x_prev = x_n
-        delta_x = lu_solve(
-            self.lu_and_piv_mass,
-            2 * delta_t * ode_fun(t_n, x_n),
-            overwrite_b=True,
-            check_finite=False,
-        )
-        x_n = x_2prev + delta_x
-        x_2prev = x_prev
-        t_n += delta_t
-    if smoothing:
-        x_n = 0.5 * (x_n + x_prev + delta_t * ode_fun(t_n, x_n))
-    return x_n, False
-
-
-def linearly_implicit_euler(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating],
-) -> tuple[NDArray[np.floating], bool]:
-    r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) x^{n+1} = \Delta t f(x^n) with a constant jacobian evaluated at x0"""
-    delta_t = (t_max - t0) / n_steps
-    lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
-
-    x_n = x0
-    t_n = t0
-    for n in range(n_steps):
-        rhs = delta_t * ode_fun(t_n, x_n)
-        delta_x = lu_solve(lu_and_piv, rhs, overwrite_b=True, check_finite=False)
-        x_n = x_n + delta_x
-        t_n += delta_t
-
-        if n == 0:
-            delta_x_0 = delta_x
-        elif (
-            n == 1
-            and norm(
-                lu_solve(
-                    lu_and_piv, b=rhs - delta_x_0, overwrite_b=True, check_finite=False
-                )
-                / delta_x_0
-            )
-            > 1.0
-        ):  # stability check
-            return x_n, True
-        # delta_x_prev = delta_x
-    return x_n, False
-
-
-def linearly_implicit_midpoint(
-    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-    x0: NDArray[np.floating],
-    t0: float,
-    t_max: float,
-    n_steps: int,
-    jac0: NDArray[np.floating],
-    smoothing=False,
-) -> tuple[NDArray[np.floating], bool]:
-    delta_t = (t_max - t0) / n_steps
-    lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
-
-    # start with a SEULER step
-    rhs = delta_t * ode_fun(t0, x0)
-    delta_x = lu_solve(lu_and_piv, rhs, overwrite_b=True, check_finite=False)
-    delta_x_0 = delta_x
-    x_n = x0 + delta_x
-    t_n = t0 + delta_t
-
-    # continue with linearly implicit midpoint
-    for n in range(1, n_steps):
-        rhs = 2 * delta_t * (ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
-        delta_x = delta_x + lu_solve(
-            lu_and_piv, rhs, overwrite_b=True, check_finite=False
-        )
-        x_n = x_n + delta_x
-        t_n += delta_t
-
-        if (
-            n == 1 and norm(0.5 * (delta_x - delta_x_0) / delta_x_0) > 1.0
-        ):  # stability check
-            return x_n, True
-
-    if (
-        smoothing
-    ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-        rhs = 2 * delta_t * (ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
-        delta_x = delta_x + lu_solve(
-            lu_and_piv, rhs, overwrite_b=True, check_finite=False
-        )
-        x_n = x_n + 0.5 * delta_x
-
-    return x_n, False
-
-
 class ExtrapolationSolver:
     def __init__(
         self,
-        base_scheme: Callable[
-            [
-                Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-                NDArray[np.floating],
-                float,
-                float,
-                int,
-                NDArray[np.floating] | None,
-            ],
-            tuple[NDArray[np.floating], bool],
-        ],
         step_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
@@ -229,7 +31,6 @@ class ExtrapolationSolver:
         step_controller: StepControllerExtrap | None,
         dtype: DTypeLike = np.double,
     ):
-        self.base_scheme = base_scheme
         if step_seq == "harmonic":
             step_seq = np.array(range(1, table_size + 1))
         elif step_seq == "Romberg":
@@ -325,6 +126,7 @@ class ExtrapolationSolver:
             mass_matrix = np.identity(num_odes, self.dtype)
         self.mass_matrix = mass_matrix
 
+        # TODO: this could be split aparts; then set ode_fun, jac_fun, mass during solve?
         total_feval_cost_at_kstep = np.cumsum(self.fevals_per_step)
         if self.is_implicit:
             total_feval_cost_at_kstep += np.cumsum(
@@ -531,6 +333,10 @@ class ExtrapolationSolver:
 
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
+    @abstractmethod
+    def base_scheme(self, *args, **kwargs):
+        raise NotImplementedError()
+
 
 class EULEX(ExtrapolationSolver):
     def __init__(
@@ -543,7 +349,6 @@ class EULEX(ExtrapolationSolver):
         dtype: DTypeLike = np.double,
     ):
         super().__init__(
-            euler if mass_matrix is None else euler_mass,
             "harmonic",
             False,
             False,
@@ -552,6 +357,25 @@ class EULEX(ExtrapolationSolver):
             dtype,
         )
         self.set_problem(ode_fun, num_odes, jac_fun, mass_matrix)
+
+    @override
+    def base_scheme(
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
+        """Euler"""
+        delta_t = (t_max - t0) / n_steps
+
+        x_n = x0
+        t_n = t0
+        for _ in range(n_steps):
+            delta_x = delta_t * self.ode_fun(t_n, x_n)
+            x_n = x_n + delta_x
+            t_n += delta_t
+        return x_n, False
 
 
 class ODEX(ExtrapolationSolver):
