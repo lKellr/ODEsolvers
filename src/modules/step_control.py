@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Literal, NamedTuple, override
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 from modules.helpers import norm_hairer, clip
 import logging
 
@@ -227,7 +227,7 @@ class StepControllerExtrap(StepController, ABC):
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
-        dtype: np.floating = np.double,
+        dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(atol, rtol, norm, safety_tol)
 
@@ -237,13 +237,14 @@ class StepControllerExtrap(StepController, ABC):
 
         self.dtype = dtype
 
-    def init_to_method(
+    def initialize_scheme(
         self,
         table_size: int,
-        step_seq: NDArray[np.integer],
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_at_kstep: NDArray[np.integer],
     ):
         self.table_size = table_size
-        self.step_seq = step_seq
+        self.err_reduction_at_step = err_reduction_at_step
 
     def get_initial_ktarget(self) -> int:
         """very rough estimate from numerical recipes, can be taken for example from Hairer&Wanner Fig.9.5"""
@@ -288,7 +289,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
-        dtype: np.floating = np.double,
+        dtype: DTypeLike = np.double,
         work_order_limits: tuple[float, float] = (0.8, 0.9),
         implicit_rel_costs: ImplicitRelCosts | None = None,
     ) -> None:
@@ -303,34 +304,20 @@ class StepControllerExtrapKH(StepControllerExtrap):
             dtype,
         )
         self.work_order_limits = work_order_limits
+        self.implicit_rel_costs = implicit_rel_costs
 
-    def init_to_method(
+    def initialize_scheme(
         self,
         table_size: int,
-        step_seq: NDArray[np.integer],
-        is_symmetric: bool,
-        fevals_per_step: NDArray[np.integer] | None = None,
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_at_kstep: NDArray[np.integer],
     ):
-        super().init_to_method(table_size, step_seq)
-
-        self.err_inc_fac = np.array(
-            [
-                (step_seq[k] / step_seq[0]) ** (1 + is_symmetric)
-                for k in range(table_size - 1)
-            ]
+        super().initialize_scheme(
+            table_size, err_reduction_at_step, total_feval_cost_at_kstep
         )
 
-        if fevals_per_step is None:
-            !fevals_per_step = step_seq
-        self.total_feval_cost_at_kstep = np.cumsum(fevals_per_step)
-        if implicit_rel_costs is not None:
-            self.total_feval_cost_at_kstep += np.cumsum(
-                implicit_rel_costs.rel_lu_cost
-                + step_seq * implicit_rel_costs.rel_backsub_cost
-            )
-            self.total_feval_cost_at_kstep += implicit_rel_costs.rel_jac_cost
-
         self.err_ratios_k = np.empty((table_size,), self.dtype)
+        self.total_feval_cost_at_kstep = total_feval_cost_at_kstep
 
     def _get_most_efficient_params(
         self, err_ratios_k: NDArray[np.floating], k_check: int
@@ -394,7 +381,10 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
                 state = "accepted"
             elif err_ratio > np.prod(
-                [self.err_inc_fac[k] for k in range(table_col_ix, k_target + 1)]
+                [
+                    self.err_reduction_at_step[k]
+                    for k in range(table_col_ix, k_target + 1)
+                ]
             ):  # b) Convergence monitor: can we expect convergence in later steps?
                 k_opt, step_mult = self._get_most_efficient_params(
                     self.err_ratios_k, table_col_ix
@@ -472,7 +462,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
-        dtype: np.floating = np.double,
+        dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
             atol,
@@ -524,7 +514,7 @@ class StepControllerExtrapP(StepControllerExtrap):
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
         step_multiplier_divergence: float = 0.5,
-        dtype: np.floating = np.double,
+        dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
             atol,
@@ -534,14 +524,6 @@ class StepControllerExtrapP(StepControllerExtrap):
             safety_tol,
             s_limits_scaled,
             step_multiplier_divergence,
-            dtype,
-        )
-
-        self.err_inc_fac = np.array(
-            [
-                (step_seq[k] / step_seq[0]) ** (1 + is_symmetric)
-                for k in range(table_size - 1)
-            ],
             dtype,
         )
 
@@ -563,7 +545,10 @@ class StepControllerExtrapP(StepControllerExtrap):
             self.is_retry = False
             state = "accepted"
         elif err_ratio > np.prod(
-            [self.err_inc_fac[k] for k in range(table_col_ix, self.table_size + 1)]
+            [
+                self.err_reduction_at_step[k]
+                for k in range(table_col_ix, self.table_size + 1)
+            ]
         ):  # b) Convergence monitor: can we expect convergence in later steps?
             self.is_retry = True
             state = "too_slow_convergence"
