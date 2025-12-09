@@ -342,6 +342,7 @@ class EULEX(ExtrapolationSolver):
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int,
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
         mass_matrix: NDArray[np.floating] | None = None,
         table_size: int = 10,
@@ -382,6 +383,7 @@ class ODEX(ExtrapolationSolver):
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
         mass_matrix: NDArray[np.floating] | None = None,
         table_size: int = 10,
@@ -404,6 +406,7 @@ class SEULEX(ExtrapolationSolver):
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int,
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
         mass_matrix: NDArray[np.floating] | None = None,
         table_size: int = 10,
@@ -426,6 +429,7 @@ class SODEX(ExtrapolationSolver):
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        num_odes: int,
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
         mass_matrix: NDArray[np.floating] | None = None,
         table_size: int = 10,
