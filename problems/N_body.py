@@ -73,11 +73,12 @@ prof_tim_start = perf_counter()
 time, result, solve_info = DP45(
     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
 )
+# time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
 prof_elapsed = perf_counter() - prof_tim_start
 print(f"solution took {prof_elapsed:.3f} s")  # 5.4s with numba njit, 20.2 s without
 
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(16, 9))
 
 time_text = ax.text(
     0.95, 0.05, f"t = 0 yr", transform=ax.transAxes, horizontalalignment="right"
@@ -85,7 +86,7 @@ time_text = ax.text(
 
 traces = []
 for i in range(0, n * dim, dim):
-    ax.plot(result[:, i], result[:, i + 1], "--", alpha=0.5)
+    ax.plot(result[:, i], result[:, i + 1], "--", alpha=0.2)
     traces.append(ax.plot(result[:1, i], result[:1, i + 1], label=names[i // dim])[0])
 
 pcol = ax.scatter(
@@ -115,6 +116,6 @@ ani = animation.FuncAnimation(
     fig=fig, func=update, frames=time.size, interval=200, repeat=True
 )
 ax.set_aspect("equal", "box")
-ax.legend()
-ani.save("N-body.mp4", fps=5)
+ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncols=n)
+ani.save("N-body.gif", fps=5)
 plt.show()
