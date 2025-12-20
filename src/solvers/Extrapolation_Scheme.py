@@ -1,7 +1,7 @@
-from abc import abstractmethod
-from typing import Any, Callable, Literal, TypeVar, override
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Literal, NamedTuple, TypeVar, override
 import numpy as np
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import DTypeLike, NDArray, TYPE_CHECKING
 import logging
 
 from scipy.linalg import lu_factor, lu_solve
@@ -23,7 +23,7 @@ class ImplicitRelCosts(NamedTuple):
     rel_backsub_cost: float
 
 
-class ExtrapolationSolver:
+class ExtrapolationSolver(ABC):
     def __init__(
         self,
         step_seq: (
@@ -33,7 +33,9 @@ class ExtrapolationSolver:
         is_symmetric: bool,
         is_implicit: bool,
         table_size: int,
-        step_controller: StepControllerExtrap | None,
+        num_odes: int,
+        step_controller: "StepControllerExtrap | None",
+        implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
         if step_seq == "harmonic":
@@ -100,38 +102,12 @@ class ExtrapolationSolver:
 
         self.step_controller = step_controller
 
-        self.jac_fun = None
-        self.ode_fun = None
-        self.mass_matrix = None
-
-    def set_problem(
-        self,
-        ode_fun: Callable[
-            [float, NDArray[np.floating]], NDArray[np.floating]
-        ],  # TODO: does this have to be set here?
-        num_odes: int,
-        jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
-        mass_matrix: NDArray[np.floating] | None,
-        implicit_rel_costs: ImplicitRelCosts | None = None,
-    ):
         if implicit_rel_costs is None:
             implicit_rel_costs = ImplicitRelCosts(  # TODO: tune these
                 rel_jac_cost=num_odes + 1 if jac_fun is None else 2,
                 rel_lu_cost=1.0,
                 rel_backsub_cost=0.0,
             )
-
-        self.ode_fun = ode_fun
-        if jac_fun is None:
-            self.jac_fun = lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
-        else:
-            self.jac_fun = jac_fun
-
-        if mass_matrix is None:
-            mass_matrix = np.identity(num_odes, self.dtype)
-        self.mass_matrix = mass_matrix
-
-        # TODO: this could be split aparts; then set ode_fun, jac_fun, mass during solve?
         total_feval_cost_at_kstep = np.cumsum(self.fevals_per_step)
         if self.is_implicit:
             total_feval_cost_at_kstep += np.cumsum(
@@ -150,6 +126,27 @@ class ExtrapolationSolver:
         self.step_controller.initialize_scheme(
             self.table_size, err_reduction_at_step, total_feval_cost_at_kstep
         )
+
+        self.jac_fun = None
+        self.ode_fun = None
+        self.mass_matrix = None
+
+    def set_problem(
+        self,
+        ode_fun: Callable[
+            [float, NDArray[np.floating]], NDArray[np.floating]
+        ],  # TODO: does this have to be set here?
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        # mass_matrix: NDArray[np.floating] | None = None,
+    ):
+
+        self.ode_fun = ode_fun
+        if jac_fun is None:
+            self.jac_fun = lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
+        else:
+            self.jac_fun = jac_fun
 
     def fill_extrapolation_table(
         self, T_fine_first_order, T_table_k, n_columns
@@ -199,9 +196,8 @@ class ExtrapolationSolver:
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
         T_table_k = np.empty((self.table_size, x_curr.shape[0]), self.dtype)
         T_table_k[0], is_diverging = self.base_scheme(
-            self.ode_fun,
-            x0=x_curr,
-            t0=t_curr,
+            x_curr,
+            t_curr,
             t_max=t_curr + step_size,
             n_steps=self.step_seq[0],
             jac0=jac0,
@@ -217,7 +213,6 @@ class ExtrapolationSolver:
             iterator_table += 1
             # Basic operations: compute with more steps, then fill row in tableau
             T_fine_first_order, is_diverging = self.base_scheme(
-                self.ode_fun,
                 x_curr,
                 t_curr,
                 t_max=step_size,
@@ -341,7 +336,14 @@ class ExtrapolationSolver:
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
     @abstractmethod
-    def base_scheme(self, *args, **kwargs):
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
         raise NotImplementedError()
 
 
@@ -351,30 +353,36 @@ class EULEX(ExtrapolationSolver):
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
         num_odes: int,
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
-        mass_matrix: NDArray[np.floating] | None = None,
+        # mass_matrix: NDArray[np.floating] | None = None,
         table_size: int = 10,
-        step_controller: StepControllerExtrap | None = None,
+        step_controller: "StepControllerExtrap | None" = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        # mass_matrix: NDArray[np.floating] | None = None,
+        implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
         super().__init__(
-            "harmonic",
+            step_seq,
             False,
             False,
             table_size,
             step_controller,
             dtype,
         )
-        self.set_problem(ode_fun, num_odes, jac_fun, mass_matrix)
 
     @override
     def base_scheme(
+        self,
         x0: NDArray[np.floating],
         t0: float,
         t_max: float,
         n_steps: int,
         jac0: NDArray[np.floating] | None = None,
     ) -> tuple[NDArray[np.floating], bool]:
-        """Euler"""
+        """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
         x_n = x0
@@ -387,69 +395,54 @@ class EULEX(ExtrapolationSolver):
 
 
 class ODEX(ExtrapolationSolver):
+    """ODEX is based around the modified midpoint method. As it is symmatric, the order increases by afactor of 2 in each extapolation step"""
+
     def __init__(
         self,
+        table_size: int,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        num_odes: int
+        num_odes: int,
         jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
-        mass_matrix: NDArray[np.floating] | None = None,
-        table_size: int = 10,
-        step_controller: StepControllerExtrap | None = None,
+        step_controller: "StepControllerExtrap | None",
+        use_smoothing: bool = False,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        # mass_matrix: NDArray[np.floating] | None = None,
         dtype: DTypeLike = np.double,
     ):
+        self.use_smoothing = use_smoothing
         super().__init__(
-            modified_midpoint if mass_matrix is None else modified_midpoint_mass,
-            "harmonic",
+            step_seq,  # TODO: give the user a choice
             True,
             False,
             table_size,
             step_controller,
             dtype,
         )
-        self.set_problem(ode_fun, num_odes, jac_fun, mass_matrix)
 
-
-class SEULEX(ExtrapolationSolver):
-    def __init__(
+    @override
+    def base_scheme(
         self,
-        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        num_odes: int,
-        jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
-        mass_matrix: NDArray[np.floating] | None = None,
-        table_size: int = 10,
-        step_controller: StepControllerExtrap | None = None,
-        dtype: DTypeLike = np.double,
-    ):
-        super().__init__(
-            linearly_implicit_euler,
-            "harmonic2",
-            False,
-            True,
-            table_size,
-            step_controller,
-            dtype,
-        )
-        self.set_problem(ode_fun, num_odes, jac_fun, mass_matrix)
-
-
-class SODEX(ExtrapolationSolver):
-    def __init__(
-        self,
-        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        num_odes: int,
-        jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None,
-        mass_matrix: NDArray[np.floating] | None = None,
-        table_size: int = 10,
-        step_controller: StepControllerExtrap | None = None,
-        dtype: DTypeLike = np.double,
-    ):
-        super().__init__(
-            linearly_implicit_midpoint,
-            "SODEX",
-            True,
-            True,
-            table_size,
-            step_controller,
-            dtype,
-        )
-        self.set_problem(ode_fun, num_odes, jac_fun, mass_matrix)
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
+        """modified midpoint method with the posibility of Gragg's smoothing"""
+        delta_t = (t_max - t0) / n_steps
+        x_2prev = x0
+        x_prev = x0
+        x_n = x0 + delta_t * self.ode_fun(t0, x_prev)  # start with an Euler step
+        t_n = t0 + delta_t
+        for _ in range(1, n_steps):
+            x_prev = x_n
+            delta_x = 2 * delta_t * self.ode_fun(t_n, x_prev)
+            x_n = x_2prev + delta_x
+            x_2prev = x_prev
+            t_n += delta_t
+        if self.use_smoothing:
+            x_n = 0.5 * (x_n + x_prev + delta_t * self.ode_fun(t_n, x_n))
+        return x_n, False

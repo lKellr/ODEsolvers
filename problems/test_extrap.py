@@ -51,14 +51,14 @@ results["AB_5"] = AB_k(x_dot, x0, t_max, h, k=5)
 #     x_dot, num_odes=x0.size, table_size=8, step_controller=StepControllerExtrapK()
 # )
 # results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
-solver_eulex_ord = EULEX(
-    x_dot, x0.size, table_size=8, step_controller=StepControllerExtrapH(8, 8)
-)
+solver_eulex_ord = EULEX(step_controller=StepControllerExtrapH())
 results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
 # solver_odex = ODEX(x_dot, x0.size, table_size=8)
 # results["ODEX"] = solver_odex.solve(x0, t_max)
 # solver_seulex = SEULEX(x_dot, x0.size, table_size=8)
 # results["SEULEX"] = solver_seulex.solve(x0, t_max)
+# solver_seulex_quad = SEULEX(x_dot, x0.size, table_size=20, dtype=np.longdouble)
+# results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
 
 # results
 fig, axes = plt.subplots(2, 1)
