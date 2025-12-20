@@ -32,7 +32,9 @@ def get_default_PI_parameters_rejected(p: int) -> ControllerPIParams:
     return ControllerPIParams(coeff_i=1.0 / p, coeff_p=0.0, s_limits=(0.2, 1.0))
 
 
-def get_step_PI(err_ratio, err_ratio_last, control_params):
+def get_step_PI(
+    err_ratio: float, err_ratio_last: float, control_params: ControllerPIParams
+) -> float:
     return clip(
         (1.0 / err_ratio) ** control_params.alpha * err_ratio_last**control_params.beta,
         control_params.s_limits[0],

@@ -10,6 +10,8 @@ from time import perf_counter
 logging.basicConfig(level=logging.DEBUG)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
+logger_mpb = logging.getLogger("numba")
+logger_mpb.setLevel(logging.INFO)
 
 # We solve the equations nondimensionalized, with reference length 1 AU, reference time 1 year and reference mass equal to the total sun system's mass
 masses = np.array([0.987, 1.67e-7, 2.47e-6, 3.03e-6, 3.24e-7, 9.62e-4, 2.88e-4])
