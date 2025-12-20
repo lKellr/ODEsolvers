@@ -7,15 +7,20 @@ import logging
 from scipy.linalg import lu_factor, lu_solve
 
 from modules.helpers import clip, numerical_jacobian, norm_hairer, numerical_jacobian_t
+
 from modules.step_control import (
-    ImplicitRelCosts,
     StepControllerExtrap,
     StepControllerExtrapKH,
+    contr_ext_state_type,
 )
 
 logger = logging.getLogger(__name__)
 
-tab_state_type = Literal["accepted", "continue", "too_slow_convergence", "divergence"]
+
+class ImplicitRelCosts(NamedTuple):
+    rel_jac_cost: float
+    rel_lu_cost: float
+    rel_backsub_cost: float
 
 
 class ExtrapolationSolver:
@@ -202,7 +207,9 @@ class ExtrapolationSolver:
             jac0=jac0,
         )
 
-        state: tab_state_type = "continue" if not is_diverging else "divergence"
+        state: contr_ext_state_type | Literal["divergence"] = (
+            "continue" if not is_diverging else "divergence"
+        )
         next_k = -1
         next_step_mult = -1.0
         iterator_table = 0

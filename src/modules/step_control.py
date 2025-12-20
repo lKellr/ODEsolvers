@@ -5,9 +5,9 @@ from numpy.typing import DTypeLike, NDArray
 from modules.helpers import norm_hairer, clip
 import logging
 
-from solvers.Extrapolation_Scheme import tab_state_type
-
 logger = logging.getLogger(__name__)
+
+contr_ext_state_type = Literal["accepted", "continue", "too_slow_convergence"]
 
 
 class ControllerPIParams(NamedTuple):
@@ -22,12 +22,6 @@ class ControllerPIParams(NamedTuple):
     @property
     def beta(self) -> float:
         return self.coeff_p
-
-
-class ImplicitRelCosts(NamedTuple):
-    rel_jac_cost: float
-    rel_lu_cost: float
-    rel_backsub_cost: float
 
 
 def get_default_PI_parameters(p: int) -> ControllerPIParams:
@@ -245,6 +239,7 @@ class StepControllerExtrap(StepController, ABC):
     ):
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
+        self.total_feval_cost_at_kstep = total_feval_cost_at_kstep
 
     def get_initial_ktarget(self) -> int:
         """very rough estimate from numerical recipes, can be taken for example from Hairer&Wanner Fig.9.5"""
@@ -273,7 +268,7 @@ class StepControllerExtrap(StepController, ABC):
         error: NDArray[np.floating],
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
-    ) -> tuple[int, float, tab_state_type]:
+    ) -> tuple[int, float, contr_ext_state_type]:
         raise NotImplementedError()
 
 
@@ -291,7 +286,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
         step_multiplier_divergence: float = 0.5,
         dtype: DTypeLike = np.double,
         work_order_limits: tuple[float, float] = (0.8, 0.9),
-        implicit_rel_costs: ImplicitRelCosts | None = None,
     ) -> None:
         super().__init__(
             atol,
@@ -304,7 +298,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
             dtype,
         )
         self.work_order_limits = work_order_limits
-        self.implicit_rel_costs = implicit_rel_costs
 
     def initialize_scheme(
         self,
@@ -315,9 +308,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         super().initialize_scheme(
             table_size, err_reduction_at_step, total_feval_cost_at_kstep
         )
-
         self.err_ratios_k = np.empty((table_size,), self.dtype)
-        self.total_feval_cost_at_kstep = total_feval_cost_at_kstep
 
     def _get_most_efficient_params(
         self, err_ratios_k: NDArray[np.floating], k_check: int
@@ -359,8 +350,8 @@ class StepControllerExtrapKH(StepControllerExtrap):
         error: NDArray[np.floating],
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
-    ) -> tuple[int, float, tab_state_type]:
-        state: tab_state_type = "continue"
+    ) -> tuple[int, float, contr_ext_state_type]:
+        state: contr_ext_state_type = "continue"
         next_k = -1
         next_step_mult = -1.0
 
@@ -483,9 +474,9 @@ class StepControllerExtrapH(StepControllerExtrap):
         error: NDArray[np.floating],
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
-    ) -> tuple[int, float, tab_state_type]:
+    ) -> tuple[int, float, contr_ext_state_type]:
         next_k = self.table_size + 1  # first check at next_k-1
-        state: tab_state_type = "continue"
+        state: contr_ext_state_type = "continue"
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
         if err_ratio <= 1.0:
@@ -535,10 +526,10 @@ class StepControllerExtrapP(StepControllerExtrap):
         error: NDArray[np.floating],
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
-    ) -> tuple[int, float, tab_state_type]:
+    ) -> tuple[int, float, contr_ext_state_type]:
         next_step_mult = 1.0  # we do not want to change the step size
         next_k = 1  # this trips convergence checks after in each tableau column
-        state: tab_state_type = "continue"
+        state: contr_ext_state_type = "continue"
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
         if err_ratio <= 1.0:
