@@ -13,43 +13,62 @@ from solvers.implicit import *
 # from solvers.Extrapolation_Scheme import SEULEX
 
 # ODE problem
-## Pendulum
-omega = 2 * np.pi
-
 x_dot = lambda t, x: np.array(
     [
-        x[1],
-        -(omega**2) * np.sin(x[0]),
-    ],
-    dtype=x.dtype,
+        2 * t * x[0] * np.log(np.maximum(x[1], 1e-3)),
+        -2 * t * x[1] * np.log(np.maximum(x[0], 1e-3)),
+    ]
 )
-t_max = 1.7
-x0 = np.array([np.pi / 2, 0.0])
+
+t_max = 5.0
+x0 = np.array([1.0, np.e])
+
+x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
 
 
 # create reference solution
 def create_solution(x_dot, x0, t_max):
-    h = t_max / 1e5
     t, x, info = DP45(x_dot, x0.astype(np.longdouble), t_max, atol=1e-8, rtol=1e-6)
 
     fig, ax = plt.subplots()
-    ax.plot(t, x[0])
-    ax.plot(t, x[1])
+    ax.plot(t, x[:, 0])
+    ax.plot(t, x[:, 1])
     plt.show()
 
-    return t, x
+    return t, x.astype(x0.dtype)
 
 
-ref_path = "reference_solution"
-if os.path.exists(ref_path + ".npz"):
-    dat = np.load(ref_path + ".npz")
-    t_ref, x_ref = dat["t"], dat["x"]
-else:
-    t_ref, x_ref = create_solution(x_dot, x0, t_max)
-    np.savez_compressed(ref_path, t=t_ref, x=x_ref)
-x_analytic = lambda t: np.array(
-    [np.interp(t, t_ref, x_ref[:, i]) for i in range(x0.size)]
-).T
+# ref_path = "reference_solution"
+# if os.path.exists(ref_path + ".npz"):
+#     dat = np.load(ref_path + ".npz")
+#     t_ref, x_ref = dat["t"], dat["x"]
+# else:
+#     t_ref, x_ref = create_solution(x_dot, x0, t_max)
+#     np.savez_compressed(ref_path, t=t_ref, x=x_ref)
+# x_analytic = lambda t: np.array(
+#     [np.interp(t, t_ref, x_ref[:, i]) for i in range(x0.size)]
+# ).T
+
+
+def benchmark_run(scheme, h):
+    timer_start = perf_counter()
+
+    t, x, info = scheme(x_dot, x0, t_max, h=h)
+
+    time = perf_counter() - timer_start
+    error = np.mean(np.linalg.norm(x - x_analytic(t), axis=1))
+
+    return time, t.size, info["n_feval"], error
+
+def benchmark_run_controlled(scheme, error):
+    timer_start = perf_counter()
+
+    t, x, info = scheme(x_dot, x0, t_max, atol=?, rtol=?)
+
+    time = perf_counter() - timer_start
+    error = np.mean(np.linalg.norm(x - x_analytic(t), axis=1))
+
+    return time, t.size, info["n_feval"], error
 
 
 # benchmark function
@@ -59,61 +78,51 @@ def benchmark_scheme(
     h0: float = 0.1,
     target_errs: list[float] = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6],
 ):
+
     timings = []
     f_evals = []
     errors = []
+    steps = []
 
-    def benchmark_run(scheme, h):
-        timer_start = perf_counter()
+    data = benchmark_run(scheme, h0)
+    timings.append(data[0])
+    steps.append(data[1])
+    f_evals.append(data[2])
+    errors.append(data[3])
 
-        t, x, info = scheme(x_dot, x0, t_max, h)
-        fig, ax = plt.subplots()
-        ax.plot(t, x[0])
-        plt.show()
-
-        time = timer_start - perf_counter()
-        error = np.linalg.norm(x[:, -1] - x_ref)  # TODO: this does not really work!
-        n_steps = t.size
-
-        timings.append(time)
-        f_evals.append(info["n_feval"])
-        errors.append(error)
-
-    benchmark_run(scheme, h0)
-
+    h = h0
     for err in target_errs:
-        n_steps: int = int(t_max / h0 * (errors[0] / err) ** (1 / expected_ord))
+        n_steps = int(
+            t_max / h * (errors[-1] / err) ** (1 / expected_ord)
+        )  # TODO: would be even better to build a logarithmic polynomial
         h = t_max / n_steps
-        benchmark_run(scheme, h)
-        print(f"h: {h}, target: {err}, err: {errors[-1]}")
+        data = benchmark_run(scheme, h)
+        timings.append(data[0])
+        steps.append(data[1])
+        f_evals.append(data[2])
+        errors.append(data[3])
+        print(f"h: {h}, target error: {err}, actual error: {errors[-1]}")
 
-    # for i in range(len(target_errs) + 1):
-    #     if i == 0:
-    #         h = h0
-    #     else:
-    #         h = h0 * (errors[0] / target_errs[i - 1]) ** (1 / expected_ord)
-    #     time, n_steps, error = benchmark_run(scheme, h)
-    #     times.append(time)
-    #     steps.append(n_steps)
-    #     errors.append(error)
-
-    return timings, f_evals, errors
+    return timings, steps, f_evals, errors
 
 
 # solve
 results = dict()
-# results["Euler"] = benchmark_scheme(
-#     Euler, 1, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4]
-# )
+results["Euler"] = benchmark_scheme(
+    Euler, 1, h0=0.01, target_errs=[1.0, 1e-1, 1e-2, 1e-3, 1e-4]
+)
 results["BWEuler"] = benchmark_scheme(
-    Backwards_Euler, 1, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3]
+    Backwards_Euler, 1, h0=0.01, target_errs=[1.0, 1e-1, 1e-2, 1e-3]
+)
+results["AB3"] = benchmark_scheme(
+    AB3, 3, h0=0.01, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 )
 results["RK4"] = benchmark_scheme(
-    RK4, 4, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+    RK4, 4, h0=0.01, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 )
-# results["DP45"] = benchmark_scheme(
-#     , 4, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
-# )
+results["DP45"] = benchmark_scheme(
+    DP45, None, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+)
 # results["SEULEX"] = benchmark_scheme(
 #     , , h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 # )
@@ -125,11 +134,13 @@ fig, ax = plt.subplots()
 ax.set_title("Convergence")
 ax.set_xlabel("steps")
 ax.set_ylabel("error")
+ax.set_xscale("log")
 ax.set_yscale("log")
 
-for solver_name, (timings, f_evals, errors) in results:
-    ax.plot(solver_results[1], errors, legend=solver_name)
+for solver_name, (timings, steps, f_evals, errors) in results.items():
+    ax.plot(steps, errors, label=solver_name)
 ax.legend(frameon=False)
+plt.show()
 
 ##  efficiency
 fig, ax = plt.subplots()
@@ -139,9 +150,10 @@ ax.set_xlabel("function evaluations")
 ax.set_ylabel("error")
 ax.set_yscale("log")
 
-for solver_name, (timings, f_evals, errors) in results:
-    ax.plot(f_evals, errors, legend=solver_name)
+for solver_name, (timings, steps, f_evals, errors) in results.items():
+    ax.plot(f_evals, errors, label=solver_name)
 ax.legend(frameon=False)
+plt.show()
 
 fig, ax = plt.subplots()
 
@@ -150,6 +162,7 @@ ax.set_xlabel("time")
 ax.set_ylabel("error")
 ax.set_yscale("log")
 
-for solver_name, (timings, f_evals, errors) in results:
-    ax.plot(timings, errors, legend=solver_name)
+for solver_name, (timings, steps, f_evals, errors) in results.items():
+    ax.plot(timings, errors, label=solver_name)
 ax.legend(frameon=False)
+plt.show()

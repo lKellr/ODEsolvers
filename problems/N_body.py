@@ -78,8 +78,8 @@ prof_elapsed = perf_counter() - prof_tim_start
 print(f"solution took {prof_elapsed:.3f} s")  # 5.4s with numba njit, 20.2 s without
 
 
-fig, ax = plt.subplots(figsize=(16, 9))
-
+fig, ax = plt.subplots(figsize=(16, 6), layout="tight")
+fig.set_tight_layout(True)
 time_text = ax.text(
     0.95, 0.05, f"t = 0 yr", transform=ax.transAxes, horizontalalignment="right"
 )
@@ -92,7 +92,7 @@ for i in range(0, n * dim, dim):
 pcol = ax.scatter(
     result[0, : n * dim : 2],
     result[0, 1 : n * dim : 2],
-    s=5e3 * np.log10(1 + masses),
+    s=5e3 * np.log10(1 + masses ** (2 / 3)),
 )
 
 
