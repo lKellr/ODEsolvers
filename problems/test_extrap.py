@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 
 from modules.step_control import (
     ControllerPIParams,
-    StepControllerExtrapP,
+    StepControllerExtrapK,
     StepControllerExtrapH,
     StepControllerExtrapKH,
 )
@@ -45,13 +45,15 @@ h = t_max / len(
 )  # use the same number of steps as the adaptive scheme
 results["AB_5"] = AB_k(x_dot, x0, t_max, h, k=5)
 
-# solver_eulex = EULEX(x_dot, x0.size, table_size=8)
-# results["EULEX"] = solver_eulex.solve(x0, t_max)
-# solver_eulex_step = EULEX(
-#     x_dot, num_odes=x0.size, table_size=8, step_controller=StepControllerExtrapK()
-# )
-# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
-solver_eulex_ord = EulerExtrapolation(1, step_controller=StepControllerExtrapH())
+solver_eulex = EulerExtrapolation(x_dot, x0.size, table_size=8)
+results["EULEX"] = solver_eulex.solve(x0, t_max)
+solver_eulex_step = EulerExtrapolation(
+    x_dot, num_odes=x0.size, table_size=8, step_controller=StepControllerExtrapK()
+)
+results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
+solver_eulex_ord = EulerExtrapolation(
+    x_dot, x0.size, step_controller=StepControllerExtrapH()
+)
 results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
 # solver_odex = ODEX(x_dot, x0.size, table_size=8)
 # results["ODEX"] = solver_odex.solve(x0, t_max)

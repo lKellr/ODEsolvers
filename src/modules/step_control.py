@@ -495,7 +495,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         return next_k, next_step_mult, state
 
 
-class StepControllerExtrapP(StepControllerExtrap):
+class StepControllerExtrapK(StepControllerExtrap):
     """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance"""
 
     def __init__(

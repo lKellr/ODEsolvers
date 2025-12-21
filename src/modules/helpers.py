@@ -47,7 +47,7 @@ def numerical_jacobian_t(
     f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     delta: float,
 ) -> NDArray[np.floating]:
-    jac = np.empty((x.shape[0], x.shape[0]))
+    jac = np.empty((x.shape[0], x.shape[0]), dtype=x.dtype)
     f_x = f(t, x)
     for j in range(x.shape[0]):
         shift = np.zeros_like(x)
