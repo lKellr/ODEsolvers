@@ -51,7 +51,13 @@ results["AB_5"] = AB_k(x_dot, x0, t_max, h, k=5)
 #     x_dot, num_odes=x0.size, table_size=8, step_controller=StepControllerExtrapK()
 # )
 # results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
-solver_eulex_ord = EULEX(step_controller=StepControllerExtrapH())
+solver_eulex_ord = ExtrapolationSolver(
+    "Euler",
+    "harmonic",
+    table_size=10,
+    num_odes=2,
+    step_controller=StepControllerExtrapH(),
+)
 results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
 # solver_odex = ODEX(x_dot, x0.size, table_size=8)
 # results["ODEX"] = solver_odex.solve(x0, t_max)
