@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from numpy._typing._array_like import NDArray
-from numpy import floating
+from numpy._typing._array_like import NDArray
+from numpy._typing._array_like import NDArray
+from numpy import float64, floating, integer
 from typing import Any, Callable, Literal, NamedTuple, TypeVar, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -39,7 +41,7 @@ class ExtrapolationSolver(ABC):
         is_implicit: bool,
         fevals_per_step: NDArray[np.integer],
         table_size: int,
-        num_odes: int,  # TODO: this is only required for implicit_rel_costs
+        num_odes: int,  # TODO: this is only required for implicit_rel_costs and mass matrix creation
         jac_fun: (
             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
         ) = None,
@@ -48,6 +50,7 @@ class ExtrapolationSolver(ABC):
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
+        # TODO: allow direct specification of the array
         if step_seq == "harmonic":
             step_seq = np.array(range(1, table_size + 1))
         elif step_seq == "Romberg":
@@ -78,7 +81,6 @@ class ExtrapolationSolver(ABC):
         self.table_size: int = table_size
         self.dtype = dtype
 
-        # self.is_symmetric = is_symmetric
         self.is_implicit = is_implicit  # TODO: is this required?
         self.step_seq = step_seq
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
@@ -117,7 +119,9 @@ class ExtrapolationSolver(ABC):
                 rel_lu_cost=1.0,
                 rel_backsub_cost=0.0,
             )
-        total_feval_cost_at_kstep = np.cumsum(self.fevals_per_step)
+        total_feval_cost_at_kstep: NDArray[np.floating] = np.cumsum(
+            fevals_per_step
+        )  # pyright: ignore[reportAssignmentType]
         if self.is_implicit:
             total_feval_cost_at_kstep += np.cumsum(
                 implicit_rel_costs.rel_lu_cost
@@ -138,12 +142,14 @@ class ExtrapolationSolver(ABC):
 
         self.ode_fun = ode_fun
         if jac_fun is None:
-            self.jac_fun: Callable[[float, NDArray[floating]], NDArray[floating]] = (
-                lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
-            )
+            self.jac_fun: Callable[
+                [float, NDArray[np.floating]], NDArray[np.floating]
+            ] = lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
         else:
             self.jac_fun = jac_fun
-        self.mass_matrix = mass_matrix
+        self.mass_matrix: NDArray[np.floating] = (
+            mass_matrix if mass_matrix is not None else np.identity(num_odes)
+        )
 
     def fill_extrapolation_table(
         self, T_fine_first_order, T_table_k, n_columns

@@ -237,7 +237,7 @@ class StepControllerExtrap(StepController, ABC):
         self,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
-        total_feval_cost_at_kstep: NDArray[np.integer],
+        total_feval_cost_at_kstep: NDArray[np.floating],
     ):
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
@@ -305,7 +305,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         self,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
-        total_feval_cost_at_kstep: NDArray[np.integer],
+        total_feval_cost_at_kstep: NDArray[np.floating],
     ):
         super().initialize_scheme(
             table_size, err_reduction_at_step, total_feval_cost_at_kstep
