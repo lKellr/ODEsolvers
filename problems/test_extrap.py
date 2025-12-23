@@ -55,6 +55,8 @@ solver_eulex_ord = EulerExtrapolation(
     x_dot, x0.size, step_controller=StepControllerExtrapH()
 )
 results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
+
+
 # solver_odex = ODEX(x_dot, x0.size, table_size=8)
 # results["ODEX"] = solver_odex.solve(x0, t_max)
 # solver_seulex = SEULEX(x_dot, x0.size, table_size=8)
