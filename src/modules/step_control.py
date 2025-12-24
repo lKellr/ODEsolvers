@@ -237,11 +237,11 @@ class StepControllerExtrap(StepController, ABC):
         self,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
-        total_feval_cost_at_kstep: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
     ):
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
-        self.total_feval_cost_at_kstep = total_feval_cost_at_kstep
+        self.total_feval_cost_for_k = total_feval_cost_for_k
 
     def get_initial_ktarget(self) -> int:
         """very rough estimate from numerical recipes, can be taken for example from Hairer&Wanner Fig.9.5"""
@@ -305,10 +305,10 @@ class StepControllerExtrapKH(StepControllerExtrap):
         self,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
-        total_feval_cost_at_kstep: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
     ):
         super().initialize_scheme(
-            table_size, err_reduction_at_step, total_feval_cost_at_kstep
+            table_size, err_reduction_at_step, total_feval_cost_for_k
         )
         self.err_ratios_k = np.empty((table_size,), self.dtype)
 
@@ -318,9 +318,9 @@ class StepControllerExtrapKH(StepControllerExtrap):
         s_same = self._get_step_mult_opt(err_ratios_k[k_check], k_check)
         s_decreased = self._get_step_mult_opt(err_ratios_k[k_check - 1], k_check - 1)
         work_same = (
-            self.total_feval_cost_at_kstep[k_check] / s_same
+            self.total_feval_cost_for_k[k_check] / s_same
         )  # NOTE: since the same step length is used with the multiplier, we can calcualte the relative work just from the multipliers
-        work_decreased = self.total_feval_cost_at_kstep[k_check - 1] / s_decreased
+        work_decreased = self.total_feval_cost_for_k[k_check - 1] / s_decreased
 
         next_k: int
         next_s: float
@@ -336,8 +336,8 @@ class StepControllerExtrapKH(StepControllerExtrap):
             next_k = k_check + 1  # order increase
             next_s = (
                 s_same
-                * self.total_feval_cost_at_kstep[k_check + 1]
-                / self.total_feval_cost_at_kstep[k_check]
+                * self.total_feval_cost_for_k[k_check + 1]
+                / self.total_feval_cost_for_k[k_check]
             )
         else:
             next_k = k_check
@@ -403,11 +403,9 @@ class StepControllerExtrapKH(StepControllerExtrap):
                 s_last = self._get_step_mult_opt(
                     self.err_ratios_k[k_target + 1], k_target + 1
                 )
-                work_decreased = (
-                    self.total_feval_cost_at_kstep[k_target - 1] / s_decreased
-                )
-                work_target = self.total_feval_cost_at_kstep[k_target] / s_target
-                work_last = self.total_feval_cost_at_kstep[k_target + 1] / s_last
+                work_decreased = self.total_feval_cost_for_k[k_target - 1] / s_decreased
+                work_target = self.total_feval_cost_for_k[k_target] / s_target
+                work_last = self.total_feval_cost_for_k[k_target + 1] / s_last
 
                 next_k = k_target
                 next_step_mult = s_target
@@ -425,7 +423,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
                     and k_target + 1 < self.table_size
                 ):
                     next_k = k_target + 1
-                    next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_at_kstep[iterator_table + 1]/self.total_feval_cost_at_kstep[iterator_table]
+                    next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
 
                 if self.is_retry:
                     next_k = min(k_target, next_k)

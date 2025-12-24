@@ -119,15 +119,15 @@ class ExtrapolationSolver(ABC):
         #         rel_lu_cost=1.0,
         #         rel_backsub_cost=0.0,
         #     )
-        # total_feval_cost_at_kstep: NDArray[np.floating] = np.cumsum(
+        # total_feval_cost_for_kstep: NDArray[np.floating] = np.cumsum(
         #     fevals_per_step
         # )  # pyright: ignore[reportAssignmentType]
         # if self.is_implicit:
-        #     total_feval_cost_at_kstep += np.cumsum(
+        #     total_feval_cost_for_kstep += np.cumsum(
         #         implicit_rel_costs.rel_lu_cost
         #         + self.step_seq * implicit_rel_costs.rel_backsub_cost
         #     )
-        #     total_feval_cost_at_kstep += implicit_rel_costs.rel_jac_cost
+        #     total_feval_cost_for_kstep += implicit_rel_costs.rel_jac_cost
 
         # err_reduction_at_step = np.array(
         #     [
@@ -137,7 +137,7 @@ class ExtrapolationSolver(ABC):
         # )
 
         # self.step_controller.initialize_scheme(
-        #     self.table_size, err_reduction_at_step, total_feval_cost_at_kstep
+        #     self.table_size, err_reduction_at_step, total_feval_cost_for_kstep
         # )
 
         self.ode_fun = ode_fun
@@ -155,7 +155,10 @@ class ExtrapolationSolver(ABC):
         self,
         implicit_rel_costs: ImplicitRelCosts | None = None,
     ):
-        if implicit_rel_costs is None: # TODO: this depends on the equation, not the scheme
+        if (
+            implicit_rel_costs
+            is None  # TODO: required for implicit schemes, or explicit with mass
+        ):  # TODO: this depends on the equation, not the scheme
             implicit_rel_costs = ImplicitRelCosts(  # TODO: tune these
                 rel_jac_cost=num_odes + 1 if jac_fun is None else 2,
                 rel_lu_cost=1.0,
@@ -163,15 +166,18 @@ class ExtrapolationSolver(ABC):
             )
 
         # TODO: following block should be moved to the scheme!
-        total_feval_cost_at_kstep: NDArray[np.floating] = np.cumsum(
-            fevals_per_kstep
-        )  # pyright: ignore[reportAssignmentType]
-        if self.require_jacobian: # TODO: this depends on the scheme, not on the jacobian requirement
-            total_feval_cost_at_kstep += np.cumsum(
-                implicit_rel_costs.rel_lu_cost
-                + self.step_seq * implicit_rel_costs.rel_backsub_cost
-            )
-            total_feval_cost_at_kstep += implicit_rel_costs.rel_jac_cost
+        # either a lambda in the child, or provide all params(n_feval, require backsub, n_LU, use_smootinh) to the parent
+        feval_cost_per_base_solve = (
+            lambda n_steps: (n_steps + use_smoothing)
+            * n_feval
+            * (1 + solve_linear * implicit_rel_costs.rel_backsub_cost)
+            + implicit_rel_costs.rel_lu_cost * n_LU
+        )
+        total_feval_cost_for_kstep: NDArray[np.floating] = np.cumsum(
+            feval_cost_per_base_solve
+        )
+        if self.require_jacobian:
+            total_feval_cost_for_k += implicit_rel_costs.rel_jac_cost
 
         err_reduction_at_step = np.array(
             [
@@ -181,7 +187,7 @@ class ExtrapolationSolver(ABC):
         )
 
         self.step_controller.initialize_scheme(
-            self.table_size, err_reduction_at_step, total_feval_cost_at_kstep
+            self.table_size, err_reduction_at_step, total_feval_cost_for_k
         )
 
     def fill_extrapolation_table(
@@ -378,7 +384,7 @@ class ExtrapolationSolver(ABC):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating] | None
+        jac0: NDArray[np.floating] | None,
     ) -> tuple[NDArray[np.floating], bool]:
         raise NotImplementedError()
 
