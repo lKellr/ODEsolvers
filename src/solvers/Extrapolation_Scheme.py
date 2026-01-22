@@ -116,7 +116,7 @@ class ExtrapolationSolver(ABC):
 
         self.ode_fun = ode_fun
 
-    def init_implicit(
+    def _init_implicit(
         self,
         num_odes: int,
         require_jacobian: bool,
@@ -144,7 +144,7 @@ class ExtrapolationSolver(ABC):
             mass_matrix if mass_matrix is not None else np.identity(num_odes)
         )
 
-    def init_controller(
+    def _init_controller(
         self,
     ):
         total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
