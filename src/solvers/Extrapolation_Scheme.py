@@ -5,7 +5,7 @@ from numpy._typing._array_like import NDArray
 from numpy import float64, floating, integer
 from typing import Any, Callable, Literal, NamedTuple, TypeVar, override
 import numpy as np
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import ArrayLike, DTypeLike, NDArray
 import logging
 
 from scipy.linalg import lu_factor, lu_solve
@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class ImplicitRelCosts(NamedTuple):
-    rel_jac_cost: float
-    rel_lu_cost: float
-    rel_backsub_cost: float
+    rel_jac_cost: float = 2.0
+    rel_lu_cost: float = 1.0
+    rel_backsub_cost: float = 0.0
 
 
 class ExtrapolationSolver(ABC):
@@ -33,56 +33,57 @@ class ExtrapolationSolver(ABC):
         ode_fun: Callable[
             [float, NDArray[np.floating]], NDArray[np.floating]
         ],  # TODO: does this have to be set here?
-        step_seq: (
-            NDArray[np.integer]
+        substep_seq: (
+            ArrayLike[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ),
         is_symmetric: bool,
-        require_jacobian: bool,
-        fevals_per_step: NDArray[np.integer],
+        # require_jacobian: bool,
         table_size: int,
-        num_odes: int,  # TODO: this is only required for implicit_rel_costs and mass matrix creation
-        jac_fun: (
-            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
-        ) = None,
-        mass_matrix: NDArray[np.floating] | None = None,
+        # num_odes: int,  # TODO: this is only required for implicit_rel_costs and mass matrix creation -> implicit schemes or implicit odes
+        # jac_fun: (
+        #     Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        # ) = None,
+        # mass_matrix: NDArray[np.floating] | None = None,
         step_controller: StepControllerExtrap | None = None,
-        implicit_rel_costs: ImplicitRelCosts | None = None,
+        # implicit_rel_costs: ImplicitRelCosts | None = None, # TODO: get rid of this
         dtype: DTypeLike = np.double,
     ):
         # TODO: allow direct specification of the array
-        if step_seq == "harmonic":
-            step_seq = np.array(range(1, table_size + 1))
-        elif step_seq == "Romberg":
-            step_seq = np.array([i**2 for i in range(table_size + 1)])
-        elif step_seq == "Bulirsch":
-            step_seq = np.array(
+        if hasattr(substep_seq, "__len__"):
+            assert len(substep_seq) >= table_size, f"substep_sequence must contain at least as many entries as the table size k={table_size}, current size: {len(substep_seq)}"
+            substep_seq = np.array(substep_seq, dtype=int)
+        elif substep_seq == "harmonic":
+            substep_seq = np.array(range(1, table_size + 1))
+        elif substep_seq == "Romberg":
+            substep_seq = np.array([i**2 for i in range(table_size + 1)])
+        elif substep_seq == "Bulirsch":
+            substep_seq = np.array(
                 [
                     2 ** (k // 2) if k == 1 or k % 2 == 0 else 1.5 * 2 ** (k // 2)
                     for k in range(1, table_size + 1)
                 ]
             )
-        elif step_seq == "harmonic2":
-            step_seq = np.array(range(2, table_size + 2))
+        elif substep_seq == "harmonic2":
+            substep_seq = np.array(range(2, table_size + 2))
         elif (
-            step_seq == "fours"
+            substep_seq == "fours"
         ):  # this sequence would allow for dense output, form Numerical Recipes
-            step_seq = np.array(range(2, 4 * table_size, 4))
-        elif step_seq == "SODEX":
+            substep_seq = np.array(range(2, 4 * table_size, 4))
+        elif substep_seq == "SODEX":
             assert (
                 table_size <= 7
             ), "table sizes larger than 7 are not implemented when using the step sequence SODEX"
-            step_seq = np.array(
+            substep_seq = np.array(
                 [2, 6, 10, 14, 22, 34, 50][:table_size]
             )  # NOTE: i am not sure if a formula exists for these; they have to be multiples of even numbers, according to Bader&Deulfhard1983, the ratio of subsequent entries must lie between 1 and 5/7
         else:
-            raise ValueError(f"step sequence of type {step_seq} is not available.")
+            raise ValueError(f"step sequence of type {substep_seq} is not available.")
 
         self.table_size: int = table_size
         self.dtype = dtype
 
-        self.require_jacobian = require_jacobian  # TODO: is this required?
-        self.step_seq = step_seq
+        self.substep_seq = substep_seq
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
         self.coeffs_Aitken = np.array(
             [
@@ -90,7 +91,7 @@ class ExtrapolationSolver(ABC):
                     (
                         (
                             1.0
-                            / (self.step_seq[j] / self.step_seq[j - k])
+                            / (self.substep_seq[j] / self.substep_seq[j - k])
                             ** (2 if is_symmetric else 1)
                             - 1.0
                         )
@@ -104,8 +105,6 @@ class ExtrapolationSolver(ABC):
             dtype,
         )
 
-        self.fevals_per_step = fevals_per_step
-
         if step_controller is None:
             step_controller = StepControllerExtrapKH(
                 dtype=dtype,
@@ -113,75 +112,46 @@ class ExtrapolationSolver(ABC):
 
         self.step_controller = step_controller
 
-        # if implicit_rel_costs is None:
-        #     implicit_rel_costs = ImplicitRelCosts(  # TODO: tune these
-        #         rel_jac_cost=num_odes + 1 if jac_fun is None else 2,
-        #         rel_lu_cost=1.0,
-        #         rel_backsub_cost=0.0,
-        #     )
-        # total_feval_cost_for_kstep: NDArray[np.floating] = np.cumsum(
-        #     fevals_per_step
-        # )  # pyright: ignore[reportAssignmentType]
-        # if self.is_implicit:
-        #     total_feval_cost_for_kstep += np.cumsum(
-        #         implicit_rel_costs.rel_lu_cost
-        #         + self.step_seq * implicit_rel_costs.rel_backsub_cost
-        #     )
-        #     total_feval_cost_for_kstep += implicit_rel_costs.rel_jac_cost
-
-        # err_reduction_at_step = np.array(
-        #     [
-        #         (self.step_seq[k] / self.step_seq[0]) ** (1 + is_symmetric)
-        #         for k in range(self.table_size - 1)
-        #     ]
-        # )
-
-        # self.step_controller.initialize_scheme(
-        #     self.table_size, err_reduction_at_step, total_feval_cost_for_kstep
-        # )
-
         self.ode_fun = ode_fun
+
+    def init_implicit(self,
+                      num_odes:int,
+                      require_jacobian: bool,
+                      jac_fun: (Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None) = None,
+                      mass_matrix: NDArray[np.floating] | None = None,
+                      implicit_rel_costs: ImplicitRelCosts | None = None,
+):
+        if (implicit_rel_costs is None): # and jac_fun is not None
+            implicit_rel_costs = ImplicitRelCosts()
+
+        self.require_jacobian = require_jacobian
         if jac_fun is None:
             self.jac_fun: Callable[
                 [float, NDArray[np.floating]], NDArray[np.floating]
-            ] = lambda t, x: numerical_jacobian_t(t, x, ode_fun, delta=1e-8)
+            ] = lambda t, x: numerical_jacobian_t(t, x, self.ode_fun, delta=1e-8)
+            if (implicit_rel_costs is None):
+                implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
         else:
             self.jac_fun = jac_fun
         self.mass_matrix: NDArray[np.floating] = (
             mass_matrix if mass_matrix is not None else np.identity(num_odes)
         )
 
+
     def init_controller(
         self,
+        feval_cost_per_base_solve: Callable[[NDArray[np.integer]], NDArray[np.floating]],
         implicit_rel_costs: ImplicitRelCosts | None = None,
     ):
-        if (
-            implicit_rel_costs
-            is None  # TODO: required for implicit schemes, or explicit with mass
-        ):  # TODO: this depends on the equation, not the scheme
-            implicit_rel_costs = ImplicitRelCosts(  # TODO: tune these
-                rel_jac_cost=num_odes + 1 if jac_fun is None else 2,
-                rel_lu_cost=1.0,
-                rel_backsub_cost=0.0,
-            )
-
-        # TODO: following block should be moved to the scheme!
-        # either a lambda in the child, or provide all params(n_feval, require backsub, n_LU, use_smootinh) to the parent
-        feval_cost_per_base_solve = (
-            lambda n_steps: (n_steps + use_smoothing)
-            * n_feval
-            * (1 + solve_linear * implicit_rel_costs.rel_backsub_cost)
-            + implicit_rel_costs.rel_lu_cost * n_LU
+        total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
+            feval_cost_per_base_solve(self.substep_seq)
         )
-        total_feval_cost_for_kstep: NDArray[np.floating] = np.cumsum(
-            feval_cost_per_base_solve
-        )
-        if self.require_jacobian:
-            total_feval_cost_for_k += implicit_rel_costs.rel_jac_cost
+        # if self.require_jacobian:
+        #     total_feval_cost_for_k += implicit_rel_costs.rel_jac_cost
 
         err_reduction_at_step = np.array(
             [
-                (self.step_seq[k] / self.step_seq[0]) ** (1 + is_symmetric)
+                (self.substep_seq[k] / self.substep_seq[0]) ** (1 + is_symmetric)
                 for k in range(self.table_size - 1)
             ]
         )
@@ -241,7 +211,7 @@ class ExtrapolationSolver(ABC):
             x_curr,
             t_curr,
             t_max=t_curr + step_size,
-            n_steps=self.step_seq[0],
+            n_steps=self.substep_seq[0],
             jac0=jac0,
         )
 
@@ -258,7 +228,7 @@ class ExtrapolationSolver(ABC):
                 x_curr,
                 t_curr,
                 t_max=step_size,
-                n_steps=self.step_seq[iterator_table],
+                n_steps=self.substep_seq[iterator_table],
                 jac0=jac0,
             )
             self.fill_extrapolation_table(T_fine_first_order, T_table_k, iterator_table)
@@ -289,12 +259,12 @@ class ExtrapolationSolver(ABC):
         step_info["stop_reason"] = state
         logger.debug(step_info["stop_reason"])
         step_info["n_feval"] = np.sum(
-            self.fevals_per_step[: iterator_table + 1]
+            self.fevals_per_substep[: iterator_table + 1]
         )  # TODO: check this
         step_info["n_lu"] = iterator_table
         step_info["n_jaceval"] = 1
         step_info["local_error"] = err
-        step_info["max_substeps"] = self.step_seq[iterator_table]
+        step_info["max_substeps"] = self.substep_seq[iterator_table]
         return (
             T_table_k[iterator_table],
             next_k,
@@ -407,7 +377,7 @@ class EulerExtrapolation(ExtrapolationSolver):
     ):
         super().__init__(
             ode_fun=ode_fun,
-            step_seq=step_seq,
+            substep_seq=step_seq,
             is_symmetric=False,
             require_jacobian=False,
             fevals_per_step=step_seq,
@@ -462,7 +432,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         self.use_smoothing = use_smoothing
         super().__init__(
             ode_fun=ode_fun,
-            step_seq=step_seq,
+            substep_seq=step_seq,
             is_symmetric=True,
             require_jacobian=False,
             fevals_per_step=step_seq + 1 * use_smoothing,
@@ -523,7 +493,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
     ):
         super().__init__(
             ode_fun=ode_fun,
-            step_seq=step_seq,
+            substep_seq=step_seq,
             is_symmetric=False,
             require_jacobian=True,
             fevals_per_step=step_seq,
@@ -603,7 +573,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         self.use_smoothing = use_smoothing
         super().__init__(
             ode_fun=ode_fun,
-            step_seq=step_seq,
+            substep_seq=step_seq,
             is_symmetric=True,
             require_jacobian=True,
             fevals_per_step=step_seq + 1 * use_smoothing,
