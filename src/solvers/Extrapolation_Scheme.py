@@ -51,8 +51,10 @@ class ExtrapolationSolver(ABC):
     ):
         # TODO: allow direct specification of the array
         if hasattr(substep_seq, "__len__"):
-            assert len(substep_seq) >= table_size, f"substep_sequence must contain at least as many entries as the table size k={table_size}, current size: {len(substep_seq)}"
-            substep_seq = np.array(substep_seq, dtype=int)
+            assert (
+                len(substep_seq) >= table_size
+            ), f"substep_sequence must contain at least as many entries as the table size k={table_size}, current size: {len(substep_seq)}"
+            substep_seq: NDArray[np.integer] = np.array(substep_seq, dtype=int)
         elif substep_seq == "harmonic":
             substep_seq = np.array(range(1, table_size + 1))
         elif substep_seq == "Romberg":
@@ -114,40 +116,42 @@ class ExtrapolationSolver(ABC):
 
         self.ode_fun = ode_fun
 
-    def init_implicit(self,
-                      num_odes:int,
-                      require_jacobian: bool,
-                      jac_fun: (Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None) = None,
-                      mass_matrix: NDArray[np.floating] | None = None,
-                      implicit_rel_costs: ImplicitRelCosts | None = None,
-):
-        if (implicit_rel_costs is None): # and jac_fun is not None
-            implicit_rel_costs = ImplicitRelCosts()
+    def init_implicit(
+        self,
+        num_odes: int,
+        require_jacobian: bool,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        mass_matrix: NDArray[np.floating] | None = None,
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ):
+        if implicit_rel_costs is None:  # and jac_fun is not None
+            self.implicit_rel_costs = ImplicitRelCosts()
+        else:
+            self.implicit_rel_costs = implicit_rel_costs
 
         self.require_jacobian = require_jacobian
         if jac_fun is None:
             self.jac_fun: Callable[
                 [float, NDArray[np.floating]], NDArray[np.floating]
             ] = lambda t, x: numerical_jacobian_t(t, x, self.ode_fun, delta=1e-8)
-            if (implicit_rel_costs is None):
-                implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
+            if implicit_rel_costs is None:
+                self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
         else:
             self.jac_fun = jac_fun
         self.mass_matrix: NDArray[np.floating] = (
             mass_matrix if mass_matrix is not None else np.identity(num_odes)
         )
 
-
     def init_controller(
         self,
-        feval_cost_per_base_solve: Callable[[NDArray[np.integer]], NDArray[np.floating]],
-        implicit_rel_costs: ImplicitRelCosts | None = None,
     ):
         total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
-            feval_cost_per_base_solve(self.substep_seq)
+            self._feval_cost_per_base_solve(self.substep_seq, implicit_rel_costs=self.implicit_rel_costs)
         )
-        # if self.require_jacobian:
-        #     total_feval_cost_for_k += implicit_rel_costs.rel_jac_cost
+        if self.require_jacobian:
+            total_feval_cost_for_k += self.implicit_rel_costs.rel_jac_cost
 
         err_reduction_at_step = np.array(
             [
@@ -348,6 +352,14 @@ class ExtrapolationSolver(ABC):
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
     @abstractmethod
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ) -> NDArray[np.floating]:
+        raise NotImplementedError()
+
+    @abstractmethod
     def base_scheme(
         self,
         x0: NDArray[np.floating],
@@ -389,6 +401,14 @@ class EulerExtrapolation(ExtrapolationSolver):
             implicit_rel_costs=None,
             dtype=dtype,
         )
+
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ) -> NDArray[np.floating]:
+        return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost if mass_matrix is not None)
 
     @override
     def base_scheme(
@@ -444,6 +464,14 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             implicit_rel_costs=None,
             dtype=dtype,
         )
+
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ) -> NDArray[np.floating]:
+        return (substep_seq + self.use_smoothing) * (1.0 + implicit_rel_costs.rel_backsub_cost if mass_matrix is not None)
 
     @override
     def base_scheme(
@@ -506,6 +534,14 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             dtype=dtype,
         )
         self.norm = self.step_controller.norm
+
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts,
+    ) -> NDArray[np.floating]:
+        return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost * (mass_matrix is not None)) + implicit_rel_costs.rel_lu_cost
 
     @override
     def base_scheme(
@@ -586,6 +622,14 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             dtype=dtype,
         )
         self.norm = self.step_controller.norm
+
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts,
+    ) -> NDArray[np.floating]:
+        return (substep_seq + self.use_smoothing) * (1.0 + implicit_rel_costs.rel_backsub_cost * (mass_matrix is not None)) + implicit_rel_costs.rel_lu_cost
 
     @override
     def base_scheme(
