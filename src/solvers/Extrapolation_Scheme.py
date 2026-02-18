@@ -103,12 +103,12 @@ class ExtrapolationSolver(ABC):
                             ** (2 if self.is_symmetric else 1)
                             - 1.0
                         )
-                        if k <= j - 1
-                        else 0.0
+                        if k <= j
+                        else np.nan
                     )
-                    for k in range(table_size - 1)
+                    for k in range(1,table_size)
                 ]
-                for j in range(table_size - 1)
+                for j in range(1,table_size)
             ],
             dtype,
         )
