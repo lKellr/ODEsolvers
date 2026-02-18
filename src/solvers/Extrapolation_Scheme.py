@@ -99,16 +99,16 @@ class ExtrapolationSolver(ABC):
                     (
                         (
                             1.0
-                            / (self.substep_seq[j] / self.substep_seq[j - k])
+                            / (self.substep_seq[k] / self.substep_seq[k - j])
                             ** (2 if self.is_symmetric else 1)
                             - 1.0
                         )
-                        if k <= j
+                        if j <= k
                         else np.nan
                     )
-                    for k in range(1,table_size)
+                    for j in range(1,table_size)
                 ]
-                for j in range(1,table_size)
+                for k in range(1,table_size)
             ],
             dtype,
         )
@@ -196,14 +196,14 @@ class ExtrapolationSolver(ABC):
         T_extrap = T_fine_first_order
 
         # perform repeated Richardson extrapolation until the target order has been reached, T_table_k contains lower resolution approximations from previous extrapolation step
-        for col in range(0, n_columns):
-            T_coarselow = T_table_k[col]
+        for j in range(0, k_target+1):
+            T_coarselow = T_table_k[j]
             T_finelow = T_extrap
             T_extrap = (
                 T_finelow
-                + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns, col]
+                + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns-1, j] # TODO: ugly unmatched indices: massage, rename n_col (actual number of cols is ncol+1)
             )
-            T_table_k[col] = T_finelow
+            T_table_k[j] = T_finelow
         T_table_k[n_columns] = T_extrap
 
     def extrapolation_step(
