@@ -459,290 +459,362 @@ class EulerExtrapolation(ExtrapolationSolver):
         return x_n, False
 
 
-# class EulerExtrapolationMass(ExtrapolationSolver):
-#     """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner.
-#     This version allows for the spcification of a mass matrix in implicit ODEs"""
+class EulerExtrapolationMass(ExtrapolationSolver):
+    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner.
+    This version allows for the spcification of a mass matrix in implicit ODEs"""
 
-#     def __init__(
-#         self,
-#         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-#         mass_matrix: NDArray[np.floating],
-#         table_size: int = 10,
-#         step_controller: StepControllerExtrap | None = None,
-#         step_seq: (
-#             NDArray[np.integer]
-#             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-#         ) = "harmonic",
-#         implicit_rel_costs: ImplicitRelCosts | None = None,
-#         dtype: DTypeLike = np.double,
-#     ):
-#         super().__init__(
-#             ode_fun=ode_fun,
-#             substep_seq=step_seq,
-#             is_symmetric=False,
-#             table_size=table_size,
-#             step_controller=step_controller,
-#             dtype=dtype,
-#         )
-#         self._init_implicit(
-#             num_odes=mass_matrix.shape[0],
-#             require_jacobian=False,
-#             mass_matrix=mass_matrix,
-#             implicit_rel_costs=implicit_rel_costs,
-#         )
-#         self._init_controller()
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        mass_matrix: NDArray[np.floating],
+        table_size: int = 10,
+        step_controller: StepControllerExtrap | None = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+        dtype: DTypeLike = np.double,
+    ):
+        super().__init__(
+            ode_fun=ode_fun,
+            substep_seq=step_seq,
+            is_symmetric=False,
+            table_size=table_size,
+            step_controller=step_controller,
+            dtype=dtype,
+        )
+        self._init_implicit(
+            num_odes=mass_matrix.shape[0],
+            require_jacobian=False,
+            mass_matrix=mass_matrix,
+            implicit_rel_costs=implicit_rel_costs,
+        )
+        self._init_controller()
 
-#     @override
-#     def _feval_cost_per_base_solve(
-#         self,
-#         substep_seq: NDArray[np.integer],
-#         implicit_rel_costs: ImplicitRelCosts,
-#     ) -> NDArray[np.floating]:
-#         return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost)
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts,
+    ) -> NDArray[np.floating]:
+        return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost)
 
-#     @override
-#     def base_scheme(
-#         self,
-#         x0: NDArray[np.floating],
-#         t0: float,
-#         t_max: float,
-#         n_steps: int,
-#         jac0: NDArray[np.floating] | None = None,
-#     ) -> tuple[NDArray[np.floating], bool]:
-#         """Forward Euler scheme"""
-#         raise NotImplementedError()
-
-
-# class ModMidpointExtrapolation(ExtrapolationSolver):
-#     """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by afactor of 2 in each extapolation step.
-#     With default config similar to the ODEX code of Hairer&Wanner"""
-
-#     def __init__(
-#         self,
-#         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-#         num_odes: int, # TODO: oly required if mass amtrix is given
-#         table_size: int = 10,
-#         step_controller: StepControllerExtrap | None = None,
-#         use_smoothing: bool = False,
-#         step_seq: (
-#             NDArray[np.integer]
-#             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-#         ) = "harmonic",
-#         mass_matrix: NDArray[np.floating] | None = None,
-#         implicit_rel_costs: ImplicitRelCosts | None = None,
-#         dtype: DTypeLike = np.double,
-#     ):
-#         self.use_smoothing = use_smoothing
-#         super().__init__(
-#             ode_fun=ode_fun,
-#             substep_seq=step_seq,
-#             is_symmetric=True,
-#             table_size=table_size,
-#             step_controller=step_controller,
-#             dtype=dtype,
-#         )
-#         if mass_matrix is not None:
-#             self._init_implicit(num_odes=num_odes, require_jacobian=False, mass_matrix=mass_matrix, implicit_rel_costs=implicit_rel_costs)
-
-#     @override
-#     def _feval_cost_per_base_solve(
-#         self,
-#         substep_seq: NDArray[np.integer],
-#         implicit_rel_costs: ImplicitRelCosts | None = None,
-#     ) -> NDArray[np.floating]:
-#         return (substep_seq + self.use_smoothing) * (1.0 + implicit_rel_costs.rel_backsub_cost if mass_matrix is not None)
-
-#     @override
-#     def base_scheme(
-#         self,
-#         x0: NDArray[np.floating],
-#         t0: float,
-#         t_max: float,
-#         n_steps: int,
-#         jac0: NDArray[np.floating] | None = None,
-#     ) -> tuple[NDArray[np.floating], bool]:
-#         """modified midpoint method with the posibility of Gragg's smoothing"""
-#         delta_t = (t_max - t0) / n_steps
-#         x_2prev = x0
-#         x_prev = x0
-#         x_n = x0 + delta_t * self.ode_fun(t0, x_prev)  # start with an Euler step
-#         t_n = t0 + delta_t
-#         for _ in range(1, n_steps):
-#             x_prev = x_n
-#             delta_x = 2 * delta_t * self.ode_fun(t_n, x_prev)
-#             x_n = x_2prev + delta_x
-#             x_2prev = x_prev
-#             t_n += delta_t
-#         if self.use_smoothing:
-#             x_n = 0.5 * (x_n + x_prev + delta_t * self.ode_fun(t_n, x_n))
-#         return x_n, False
+    @override
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
+        """Forward Euler scheme"""
+        raise NotImplementedError()
 
 
-# class LimplicitEulerExtrapolation(ExtrapolationSolver):
-#     """Extrapolation with the linearly-implicit Euler method as the underlying scheme and therefore usable for stiff problems. With default config similar to the SEULEX code of Hairer&Wanner"""
+class ModMidpointExtrapolation(ExtrapolationSolver):
+    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by afactor of 2 in each extapolation step.
+    With default config similar to the ODEX code of Hairer&Wanner"""
 
-#     def __init__(
-#         self,
-#         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-#         num_odes: int,
-#         table_size: int = 10,
-#         jac_fun: (
-#             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
-#         ) = None,
-#         step_controller: StepControllerExtrap | None = None,
-#         step_seq: (
-#             NDArray[np.integer]
-#             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-#         ) = "harmonic2",
-#         mass_matrix: NDArray[np.floating] | None = None,
-#         implicit_rel_costs: ImplicitRelCosts | None = None,
-#         dtype: DTypeLike = np.double,
-#     ):
-#         super().__init__(
-#             ode_fun=ode_fun,
-#             substep_seq=step_seq,
-#             is_symmetric=False,
-#             table_size=table_size,
-#             step_controller=step_controller,
-#             dtype=dtype,
-#         )
-#         self.norm = self.step_controller.norm
-#         self._init_implicit(num_odes=num_odes, require_jacobian=False, jac_fun=jac_fun, mass_matrix=mass_matrix, implicit_rel_costs=implicit_rel_costs)
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        table_size: int = 10,
+        step_controller: StepControllerExtrap | None = None,
+        use_smoothing: bool = False,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        dtype: DTypeLike = np.double,
+    ):
+        self.use_smoothing = use_smoothing
+        super().__init__(
+            ode_fun=ode_fun,
+            substep_seq=step_seq,
+            is_symmetric=True,
+            table_size=table_size,
+            step_controller=step_controller,
+            dtype=dtype,
+        )
 
-#     @override
-#     def _feval_cost_per_base_solve(
-#         self,
-#         substep_seq: NDArray[np.integer],
-#         implicit_rel_costs: ImplicitRelCosts,
-#     ) -> NDArray[np.floating]:
-#         return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)) + implicit_rel_costs.rel_lu_cost
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ) -> NDArray[np.floating]:
+        return (substep_seq + self.use_smoothing) * 1.0
 
-#     @override
-#     def base_scheme(
-#         self,
-#         x0: NDArray[np.floating],
-#         t0: float,
-#         t_max: float,
-#         n_steps: int,
-#         jac0: NDArray[np.floating],
-#     ) -> tuple[NDArray[np.floating], bool]:
-#         r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) x^{n+1} = \Delta t f(x^n) with a constant jacobian evaluated at x0"""
-#         delta_t = (t_max - t0) / n_steps
-#         lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
-
-#         x_n = x0
-#         t_n = t0
-#         delta_x_0: NDArray[np.floating]
-#         for n in range(n_steps):
-#             rhs = delta_t * self.ode_fun(t_n, x_n)
-#             delta_x: NDArray[np.floating] = lu_solve(
-#                 lu_and_piv, rhs, overwrite_b=False, check_finite=False
-#             )  # TODO: i can not overwrite b here because of the convergence check
-#             x_n = x_n + delta_x
-#             t_n += delta_t
-
-#             if n == 0:
-#                 delta_x_0 = delta_x
-#             elif (
-#                 n == 1
-#                 and self.norm(
-#                     lu_solve(
-#                         lu_and_piv,
-#                         b=rhs
-#                         - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
-#                         overwrite_b=True,
-#                         check_finite=False,
-#                     )
-#                     / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
-#                 )
-#                 > 1.0
-#             ):  # stability check
-#                 return x_n, True
-#             # delta_x_prev = delta_x
-#         return x_n, False
+    @override
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
+        """modified midpoint method with the posibility of Gragg's smoothing"""
+        delta_t = (t_max - t0) / n_steps
+        x_2prev = x0
+        x_prev = x0
+        x_n = x0 + delta_t * self.ode_fun(t0, x_prev)  # start with an Euler step
+        t_n = t0 + delta_t
+        for _ in range(1, n_steps):
+            x_prev = x_n
+            delta_x = 2 * delta_t * self.ode_fun(t_n, x_prev)
+            x_n = x_2prev + delta_x
+            x_2prev = x_prev
+            t_n += delta_t
+        if self.use_smoothing:
+            x_n = 0.5 * (x_n + x_prev + delta_t * self.ode_fun(t_n, x_n))
+        return x_n, False
 
 
-# class LimplicitMidpointExtrapolation(ExtrapolationSolver):
-#     """Extrapolation method using the linearly-implicit midpoint scheme as its base method. Applicable to stiff problems and corresponds to the SODEX scheme of Hairer&Wanner"""
+class ModMidpointExtrapolationMass(ExtrapolationSolver):
+    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by afactor of 2 in each extapolation step.
+    With default config similar to the ODEX code of Hairer&Wanner"""
 
-#     def __init__(
-#         self,
-#         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-#         num_odes: int,
-#         table_size: int = 10,
-#         jac_fun: (
-#             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
-#         ) = None,
-#         step_controller: StepControllerExtrap | None = None,
-#         use_smoothing: bool = False,
-#         step_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
-#         mass_matrix: NDArray[np.floating] | None = None,
-#         implicit_rel_costs: ImplicitRelCosts | None = None,
-#         dtype: DTypeLike = np.double,
-#     ):
-#         self.use_smoothing = use_smoothing
-#         super().__init__(
-#             ode_fun=ode_fun,
-#             substep_seq=step_seq,
-#             is_symmetric=True,
-#             table_size=table_size,
-#             step_controller=step_controller,
-#             dtype=dtype,
-#         )
-#         self.norm = self.step_controller.norm
-#         self._init_implicit(num_odes=num_odes, require_jacobian=False, jac_fun=jac_fun, mass_matrix=mass_matrix, implicit_rel_costs=implicit_rel_costs)
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        mass_matrix: NDArray[np.floating],
+        table_size: int = 10,
+        step_controller: StepControllerExtrap | None = None,
+        use_smoothing: bool = False,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+        dtype: DTypeLike = np.double,
+    ):
+        self.use_smoothing = use_smoothing
+        super().__init__(
+            ode_fun=ode_fun,
+            substep_seq=step_seq,
+            is_symmetric=True,
+            table_size=table_size,
+            step_controller=step_controller,
+            dtype=dtype,
+        )
+        self._init_implicit(
+            num_odes=mass_matrix.shape[0],
+            require_jacobian=False,
+            mass_matrix=mass_matrix,
+            implicit_rel_costs=implicit_rel_costs,
+        )
 
-#     @override
-#     def _feval_cost_per_base_solve(
-#         self,
-#         substep_seq: NDArray[np.integer],
-#         implicit_rel_costs: ImplicitRelCosts,
-#     ) -> NDArray[np.floating]:
-#         return (substep_seq + self.use_smoothing) * (1.0 + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)) + implicit_rel_costs.rel_lu_cost
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+    ) -> NDArray[np.floating]:
+        return (substep_seq + self.use_smoothing) * (
+            1.0 + implicit_rel_costs.rel_backsub_cost
+        )
 
-#     @override
-#     def base_scheme(
-#         self,
-#         x0: NDArray[np.floating],
-#         t0: float,
-#         t_max: float,
-#         n_steps: int,
-#         jac0: NDArray[np.floating],
-#     ) -> tuple[NDArray[np.floating], bool]:
-#         """linearly implicit midpoint scheme with optional Gragg-smoothing"""
-#         delta_t = (t_max - t0) / n_steps
-#         lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
+    @override
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], bool]:
+        """modified midpoint method with the posibility of Gragg's smoothing"""
+        raise NotImplementedError()
 
-#         # start with a linearized-implicit euler step
-#         rhs = delta_t * self.ode_fun(t0, x0)
-#         delta_x: NDArray[np.floating] = lu_solve(
-#             lu_and_piv, rhs, overwrite_b=True, check_finite=False
-#         )
-#         delta_x_0 = delta_x
-#         x_n = x0 + delta_x
-#         t_n = t0 + delta_t
 
-#         # continue with linearly implicit midpoint
-#         for n in range(1, n_steps):
-#             rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
-#             delta_x = delta_x + lu_solve(
-#                 lu_and_piv, rhs, overwrite_b=False, check_finite=False
-#             )  # TODO: i can not overwrite b here because of the convergence check
-#             x_n = x_n + delta_x
-#             t_n += delta_t
+class LimplicitEulerExtrapolation(ExtrapolationSolver):
+    """Extrapolation with the linearly-implicit Euler method as the underlying scheme and therefore usable for stiff problems. With default config similar to the SEULEX code of Hairer&Wanner"""
 
-#             if (
-#                 n == 1 and self.norm(0.5 * (delta_x - delta_x_0) / delta_x_0) > 1.0
-#             ):  # stability check
-#                 return x_n, True
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        table_size: int = 10,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        step_controller: StepControllerExtrap | None = None,
+        step_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic2",
+        mass_matrix: NDArray[np.floating] | None = None,
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+        dtype: DTypeLike = np.double,
+    ):
+        super().__init__(
+            ode_fun=ode_fun,
+            substep_seq=step_seq,
+            is_symmetric=False,
+            table_size=table_size,
+            step_controller=step_controller,
+            dtype=dtype,
+        )
+        self.norm = self.step_controller.norm
+        self._init_implicit(
+            num_odes=num_odes,
+            require_jacobian=False,
+            jac_fun=jac_fun,
+            mass_matrix=mass_matrix,
+            implicit_rel_costs=implicit_rel_costs,
+        )
 
-#         if (
-#             self.use_smoothing
-#         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-#             rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
-#             delta_x = delta_x + lu_solve(
-#                 lu_and_piv, rhs, overwrite_b=True, check_finite=False
-#             )
-#             x_n = x_n + 0.5 * delta_x
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts,
+    ) -> NDArray[np.floating]:
+        return (
+            substep_seq
+            * (
+                1.0
+                + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)
+            )
+            + implicit_rel_costs.rel_lu_cost
+        )
 
-#         return x_n, False
+    @override
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating],
+    ) -> tuple[NDArray[np.floating], bool]:
+        r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) x^{n+1} = \Delta t f(x^n) with a constant jacobian evaluated at x0"""
+        delta_t = (t_max - t0) / n_steps
+        lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
+
+        x_n = x0
+        t_n = t0
+        delta_x_0: NDArray[np.floating]
+        for n in range(n_steps):
+            rhs = delta_t * self.ode_fun(t_n, x_n)
+            delta_x: NDArray[np.floating] = lu_solve(
+                lu_and_piv, rhs, overwrite_b=False, check_finite=False
+            )  # TODO: i can not overwrite b here because of the convergence check
+            x_n = x_n + delta_x
+            t_n += delta_t
+
+            if n == 0:
+                delta_x_0 = delta_x
+            elif (
+                n == 1
+                and self.norm(
+                    lu_solve(
+                        lu_and_piv,
+                        b=rhs
+                        - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                        overwrite_b=True,
+                        check_finite=False,
+                    )
+                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                )
+                > 1.0
+            ):  # stability check
+                return x_n, True
+            # delta_x_prev = delta_x
+        return x_n, False
+
+
+class LimplicitMidpointExtrapolation(ExtrapolationSolver):
+    """Extrapolation method using the linearly-implicit midpoint scheme as its base method. Applicable to stiff problems and corresponds to the SODEX scheme of Hairer&Wanner"""
+
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        table_size: int = 10,
+        jac_fun: (
+            Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
+        ) = None,
+        step_controller: StepControllerExtrap | None = None,
+        use_smoothing: bool = False,
+        step_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
+        mass_matrix: NDArray[np.floating] | None = None,
+        implicit_rel_costs: ImplicitRelCosts | None = None,
+        dtype: DTypeLike = np.double,
+    ):
+        self.use_smoothing = use_smoothing
+        super().__init__(
+            ode_fun=ode_fun,
+            substep_seq=step_seq,
+            is_symmetric=True,
+            table_size=table_size,
+            step_controller=step_controller,
+            dtype=dtype,
+        )
+        self.norm = self.step_controller.norm
+
+        self._init_implicit(
+            num_odes=num_odes,
+            require_jacobian=False,
+            jac_fun=jac_fun,
+            mass_matrix=mass_matrix,
+            implicit_rel_costs=implicit_rel_costs,
+        )
+
+    @override
+    def _feval_cost_per_base_solve(
+        self,
+        substep_seq: NDArray[np.integer],
+        implicit_rel_costs: ImplicitRelCosts,
+    ) -> NDArray[np.floating]:
+        return (substep_seq + self.use_smoothing) * (
+            1.0 + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)
+        ) + implicit_rel_costs.rel_lu_cost
+
+    @override
+    def base_scheme(
+        self,
+        x0: NDArray[np.floating],
+        t0: float,
+        t_max: float,
+        n_steps: int,
+        jac0: NDArray[np.floating],
+    ) -> tuple[NDArray[np.floating], bool]:
+        """linearly implicit midpoint scheme with optional Gragg-smoothing"""
+        delta_t = (t_max - t0) / n_steps
+        lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
+
+        # start with a linearized-implicit euler step
+        rhs = delta_t * self.ode_fun(t0, x0)
+        delta_x: NDArray[np.floating] = lu_solve(
+            lu_and_piv, rhs, overwrite_b=True, check_finite=False
+        )
+        delta_x_0 = delta_x
+        x_n = x0 + delta_x
+        t_n = t0 + delta_t
+
+        # continue with linearly implicit midpoint
+        for n in range(1, n_steps):
+            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
+            delta_x = delta_x + lu_solve(
+                lu_and_piv, rhs, overwrite_b=False, check_finite=False
+            )  # TODO: i can not overwrite b here because of the convergence check
+            x_n = x_n + delta_x
+            t_n += delta_t
+
+            if (
+                n == 1 and self.norm(0.5 * (delta_x - delta_x_0) / delta_x_0) > 1.0
+            ):  # stability check
+                return x_n, True
+
+        if (
+            self.use_smoothing
+        ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
+            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
+            delta_x = delta_x + lu_solve(
+                lu_and_piv, rhs, overwrite_b=True, check_finite=False
+            )
+            x_n = x_n + 0.5 * delta_x
+
+        return x_n, False
