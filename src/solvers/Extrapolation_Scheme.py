@@ -227,7 +227,9 @@ class ExtrapolationSolver(ABC):
         )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
         jac0 = None
-        if self.require_jacobian:
+        if (
+            self.require_jacobian
+        ):  # TODO: recompute only if theta is above some tolerance
             jac0 = self.jac_fun(t_curr, x_curr.astype(self.dtype))
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
@@ -492,6 +494,8 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         )
         self._init_controller()
 
+        self.lu_and_piv_mass = lu_factor(mass_matrix)
+
     @override
     def _feval_cost_per_base_solve(
         self,
@@ -510,7 +514,21 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         jac0: NDArray[np.floating] | None = None,
     ) -> tuple[NDArray[np.floating], bool]:
         """Forward Euler scheme"""
-        raise NotImplementedError()
+        delta_t = (t_max - t0) / n_steps
+
+        x_n = x0
+        t_n = t0
+        for _ in range(n_steps):
+            delta_x = lu_solve(
+                self.lu_and_piv_mass,
+                delta_t * self.ode_fun(t_n, x_n),
+                overwrite_b=True,
+                check_finite=False,
+            )
+
+            x_n = x_n + delta_x
+            t_n += delta_t
+        return x_n, False
 
 
 class ModMidpointExtrapolation(ExtrapolationSolver):
@@ -607,6 +625,8 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
             implicit_rel_costs=implicit_rel_costs,
         )
 
+        self.lu_and_piv_mass = lu_factor(mass_matrix)
+
     @override
     def _feval_cost_per_base_solve(
         self,
@@ -627,7 +647,39 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         jac0: NDArray[np.floating] | None = None,
     ) -> tuple[NDArray[np.floating], bool]:
         """modified midpoint method with the posibility of Gragg's smoothing"""
-        raise NotImplementedError()
+        delta_t = (t_max - t0) / n_steps
+        x_2prev = x0
+        x_prev = x0
+        x_n = x0 + lu_solve(
+            self.lu_and_piv_mass,
+            delta_t * self.ode_fun(t0, x_prev),
+            overwrite_b=True,
+            check_finite=False,
+        )  # start with an Euler step
+        t_n = t0 + delta_t
+        for _ in range(1, n_steps):
+            x_prev = x_n
+            delta_x = lu_solve(
+                self.lu_and_piv_mass,
+                2 * delta_t * self.ode_fun(t_n, x_n),
+                overwrite_b=True,
+                check_finite=False,
+            )
+            x_n = x_2prev + delta_x
+            x_2prev = x_prev
+            t_n += delta_t
+        if self.use_smoothing:
+            x_n = 0.5 * (
+                x_n
+                + x_2prev
+                + lu_solve(
+                    self.lu_and_piv_mass,
+                    delta_t * self.ode_fun(t_n, x_n),
+                    overwrite_b=True,
+                    check_finite=False,
+                )
+            )
+        return x_n, False
 
 
 class LimplicitEulerExtrapolation(ExtrapolationSolver):
