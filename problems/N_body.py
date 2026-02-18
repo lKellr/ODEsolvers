@@ -119,5 +119,5 @@ ani = animation.FuncAnimation(
 )
 ax.set_aspect("equal", "box")
 ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncols=n)
-ani.save("N-body.gif", fps=5)
+# ani.save("N-body.gif", fps=5)
 plt.show()

@@ -3,7 +3,16 @@ from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
 from numpy import float64, floating, integer
-from typing import Any, Callable, Literal, NamedTuple, TypeVar, override
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    NamedTuple,
+    TypeVar,
+    assert_type,
+    overload,
+    override,
+)
 import numpy as np
 from numpy.typing import ArrayLike, DTypeLike, NDArray
 import logging
@@ -104,11 +113,16 @@ class ExtrapolationSolver(ABC):
             dtype,
         )
 
+        # these will be initialized in _init_implicit()
+        self.implicit_rel_costs = None
+        self.require_jacobian = False
+        self.jac_fun = None
+        self.mass_matrix = None
+
         if step_controller is None:
             step_controller = StepControllerExtrapKH(
                 dtype=dtype,
             )
-
         self.step_controller = step_controller
 
         self.ode_fun = ode_fun
@@ -123,7 +137,7 @@ class ExtrapolationSolver(ABC):
         mass_matrix: NDArray[np.floating] | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
     ):
-        if implicit_rel_costs is None:  # and jac_fun is not None
+        if implicit_rel_costs is None:
             self.implicit_rel_costs = ImplicitRelCosts()
         else:
             self.implicit_rel_costs = implicit_rel_costs
@@ -137,9 +151,18 @@ class ExtrapolationSolver(ABC):
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
         else:
             self.jac_fun = jac_fun
-        self.mass_matrix: NDArray[np.floating] = (
-            mass_matrix if mass_matrix is not None else np.identity(num_odes)
-        )
+
+        self.mass_matrix: NDArray[np.floating]
+        if mass_matrix is None:
+            self.mass_matrix = np.identity(num_odes)
+        else:
+            mm_shape = self.mass_matrix.shape
+            assert (
+                len(mm_shape) == 2
+                and (mm_shape[0] == mm_shape[1])
+                and (mm_shape[0] == num_odes)
+            ), "mass matrix must be square and dimensions must match num_odes"
+            self.mass_matrix = mass_matrix
 
     def _init_controller(
         self,
@@ -147,6 +170,7 @@ class ExtrapolationSolver(ABC):
         total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
             self._feval_cost_per_base_solve(self.substep_seq, implicit_rel_costs=self.implicit_rel_costs)
         )
+
         if self.require_jacobian:
             total_feval_cost_for_k += self.implicit_rel_costs.rel_jac_cost
 
@@ -259,9 +283,9 @@ class ExtrapolationSolver(ABC):
 
         step_info["stop_reason"] = state
         logger.debug(step_info["stop_reason"])
-        step_info["n_feval"] = np.sum(
-            self.fevals_per_substep[: iterator_table + 1]
-        )  # TODO: check this
+        # step_info["n_feval"] = self._fevals_per_base_solve(
+        #     iterator_table
+        # )  # TODO: check this
         step_info["n_lu"] = iterator_table
         step_info["n_jaceval"] = 1
         step_info["local_error"] = err
@@ -348,13 +372,27 @@ class ExtrapolationSolver(ABC):
 
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
+    # @overload
+    # def _fevals_per_base_solve(self, steps: int) -> int:
+    #     pass
+
+    # @overload
+    # def _fevals_per_base_solve(self, steps: NDArray[np.integer]) -> NDArray[np.integer]:
+    #     pass
+
+    # @abstractmethod
+    # def _fevals_per_base_solve(
+    #     self, steps: int | NDArray[np.integer]
+    # ) -> int | NDArray[np.integer]:
+    #     raise NotImplementedError()
+
     @abstractmethod
     def _feval_cost_per_base_solve(
         self,
         substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
+        implicit_rel_costs: ImplicitRelCosts | None,
     ) -> NDArray[np.floating]:
-        return self._fevals_per_base_solve(substep_seq)
+        return substep_seq * 1.0
 
     @abstractmethod
     def base_scheme(
@@ -392,27 +430,13 @@ class EulerExtrapolation(ExtrapolationSolver):
         )
         self._init_controller()
 
-    # @overload
-    # def _fevals_per_base_solve(self, steps: int) -> int:
-    #     pass
-
-    # @overload
-    # def _fevals_per_base_solve(self, steps: NDArray[np.integer]) -> NDArray[np.integer]:
-    #     pass
-
-    # @override
-    # def _fevals_per_base_solve(
-    #     self, steps: int | NDArray[np.integer]
-    # ) -> int | NDArray[np.integer]:
-    #     return steps
-
     @override
     def _feval_cost_per_base_solve(
         self,
         substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
+        implicit_rel_costs: ImplicitRelCosts | None,
     ) -> NDArray[np.floating]:
-        return substep_seq
+        return substep_seq * 1.0
 
     @override
     def base_scheme(
@@ -435,58 +459,58 @@ class EulerExtrapolation(ExtrapolationSolver):
         return x_n, False
 
 
-class EulerExtrapolationMass(ExtrapolationSolver):
-    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner.
-    This version allows for the spcification of a mass matrix in implicit ODEs"""
+# class EulerExtrapolationMass(ExtrapolationSolver):
+#     """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner.
+#     This version allows for the spcification of a mass matrix in implicit ODEs"""
 
-    def __init__(
-        self,
-        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        mass_matrix: NDArray[np.floating],
-        table_size: int = 10,
-        step_controller: StepControllerExtrap | None = None,
-        step_seq: (
-            NDArray[np.integer]
-            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-        ) = "harmonic",
-        implicit_rel_costs: ImplicitRelCosts | None = None,
-        dtype: DTypeLike = np.double,
-    ):
-        super().__init__(
-            ode_fun=ode_fun,
-            substep_seq=step_seq,
-            is_symmetric=False,
-            table_size=table_size,
-            step_controller=step_controller,
-            dtype=dtype,
-        )
-        self._init_implicit(
-            num_odes=mass_matrix.shape[0],
-            require_jacobian=False,
-            mass_matrix=mass_matrix,
-            implicit_rel_costs=implicit_rel_costs,
-        )
-        self._init_controller()
+#     def __init__(
+#         self,
+#         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+#         mass_matrix: NDArray[np.floating],
+#         table_size: int = 10,
+#         step_controller: StepControllerExtrap | None = None,
+#         step_seq: (
+#             NDArray[np.integer]
+#             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+#         ) = "harmonic",
+#         implicit_rel_costs: ImplicitRelCosts | None = None,
+#         dtype: DTypeLike = np.double,
+#     ):
+#         super().__init__(
+#             ode_fun=ode_fun,
+#             substep_seq=step_seq,
+#             is_symmetric=False,
+#             table_size=table_size,
+#             step_controller=step_controller,
+#             dtype=dtype,
+#         )
+#         self._init_implicit(
+#             num_odes=mass_matrix.shape[0],
+#             require_jacobian=False,
+#             mass_matrix=mass_matrix,
+#             implicit_rel_costs=implicit_rel_costs,
+#         )
+#         self._init_controller()
 
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
-    ) -> NDArray[np.floating]:
-        return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost)
+#     @override
+#     def _feval_cost_per_base_solve(
+#         self,
+#         substep_seq: NDArray[np.integer],
+#         implicit_rel_costs: ImplicitRelCosts,
+#     ) -> NDArray[np.floating]:
+#         return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost)
 
-    @override
-    def base_scheme(
-        self,
-        x0: NDArray[np.floating],
-        t0: float,
-        t_max: float,
-        n_steps: int,
-        jac0: NDArray[np.floating] | None = None,
-    ) -> tuple[NDArray[np.floating], bool]:
-        """Forward Euler scheme"""
-        raise NotImplementedError()
+#     @override
+#     def base_scheme(
+#         self,
+#         x0: NDArray[np.floating],
+#         t0: float,
+#         t_max: float,
+#         n_steps: int,
+#         jac0: NDArray[np.floating] | None = None,
+#     ) -> tuple[NDArray[np.floating], bool]:
+#         """Forward Euler scheme"""
+#         raise NotImplementedError()
 
 
 # class ModMidpointExtrapolation(ExtrapolationSolver):
