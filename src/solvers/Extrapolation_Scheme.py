@@ -28,33 +28,29 @@ class ImplicitRelCosts(NamedTuple):
 
 
 class ExtrapolationSolver(ABC):
+
     def __init__(
         self,
         ode_fun: Callable[
             [float, NDArray[np.floating]], NDArray[np.floating]
         ],  # TODO: does this have to be set here?
         substep_seq: (
-            ArrayLike[np.integer]
+            NDArray[np.integer]
+            | list[int]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ),
         is_symmetric: bool,
-        # require_jacobian: bool,
         table_size: int,
-        # num_odes: int,  # TODO: this is only required for implicit_rel_costs and mass matrix creation -> implicit schemes or implicit odes
-        # jac_fun: (
-        #     Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
-        # ) = None,
-        # mass_matrix: NDArray[np.floating] | None = None,
         step_controller: StepControllerExtrap | None = None,
-        # implicit_rel_costs: ImplicitRelCosts | None = None, # TODO: get rid of this
         dtype: DTypeLike = np.double,
     ):
-        # TODO: allow direct specification of the array
-        if hasattr(substep_seq, "__len__"):
+        if hasattr(substep_seq, "__len__") and all(
+            isinstance(item, int) for item in substep_seq
+        ):
             assert (
                 len(substep_seq) >= table_size
             ), f"substep_sequence must contain at least as many entries as the table size k={table_size}, current size: {len(substep_seq)}"
-            substep_seq: NDArray[np.integer] = np.array(substep_seq, dtype=int)
+            substep_seq = np.array(substep_seq, dtype=int)
         elif substep_seq == "harmonic":
             substep_seq = np.array(range(1, table_size + 1))
         elif substep_seq == "Romberg":
@@ -86,6 +82,7 @@ class ExtrapolationSolver(ABC):
         self.dtype = dtype
 
         self.substep_seq = substep_seq
+        self.is_symmetric = is_symmetric
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
         self.coeffs_Aitken = np.array(
             [
@@ -94,7 +91,7 @@ class ExtrapolationSolver(ABC):
                         (
                             1.0
                             / (self.substep_seq[j] / self.substep_seq[j - k])
-                            ** (2 if is_symmetric else 1)
+                            ** (2 if self.is_symmetric else 1)
                             - 1.0
                         )
                         if k <= j - 1
@@ -155,7 +152,7 @@ class ExtrapolationSolver(ABC):
 
         err_reduction_at_step = np.array(
             [
-                (self.substep_seq[k] / self.substep_seq[0]) ** (1 + is_symmetric)
+                (self.substep_seq[k] / self.substep_seq[0]) ** (1 + self.is_symmetric)
                 for k in range(self.table_size - 1)
             ]
         )
@@ -355,9 +352,9 @@ class ExtrapolationSolver(ABC):
     def _feval_cost_per_base_solve(
         self,
         substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts | None = None,
+        implicit_rel_costs: ImplicitRelCosts,
     ) -> NDArray[np.floating]:
-        raise NotImplementedError()
+        return self._fevals_per_base_solve(substep_seq)
 
     @abstractmethod
     def base_scheme(
@@ -377,7 +374,6 @@ class EulerExtrapolation(ExtrapolationSolver):
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        num_odes: int,
         table_size: int = 10,
         step_controller: StepControllerExtrap | None = None,
         step_seq: (
@@ -391,14 +387,8 @@ class EulerExtrapolation(ExtrapolationSolver):
             ode_fun=ode_fun,
             substep_seq=step_seq,
             is_symmetric=False,
-            require_jacobian=False,
-            fevals_per_step=step_seq,
             table_size=table_size,
-            num_odes=num_odes,
-            jac_fun=None,
-            mass_matrix=mass_matrix,
             step_controller=step_controller,
-            implicit_rel_costs=None,
             dtype=dtype,
         )
 
