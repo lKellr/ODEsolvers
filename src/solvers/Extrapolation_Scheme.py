@@ -104,11 +104,11 @@ class ExtrapolationSolver(ABC):
                             - 1.0
                         )
                         if j <= k
-                        else np.nan
+                        else None  # will be cast to NaN
                     )
-                    for j in range(1,table_size)
+                    for j in range(1, table_size)
                 ]
-                for k in range(1,table_size)
+                for k in range(1, table_size)
             ],
             dtype,
         )
@@ -168,7 +168,9 @@ class ExtrapolationSolver(ABC):
         self,
     ):
         total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
-            self._feval_cost_per_base_solve(self.substep_seq, implicit_rel_costs=self.implicit_rel_costs)
+            self._feval_cost_per_base_solve(
+                self.substep_seq, implicit_rel_costs=self.implicit_rel_costs
+            )
         )
 
         if self.require_jacobian:
@@ -185,26 +187,26 @@ class ExtrapolationSolver(ABC):
             self.table_size, err_reduction_at_step, total_feval_cost_for_k
         )
 
-    def fill_extrapolation_table(
-        self, T_fine_first_order, T_table_k, n_columns
-    ) -> None:
+    def fill_extrapolation_table(self, T_fine_first_order, T_table_k, k) -> None:
         """Increases the accuracy of the estimate for x0 by one order in the stepsize with the help of Richardson extrapolation.
         For this, the number of steps has to be increased over the previous order. Approximations of all orders lower than the target order are computed with this number of steps.
-        [[Target_k is the target_order - 1, which is again shfted by one relative to the literature because y indexing begins at zero.]]
-        The function fills a table of the computed approximations to reuse in the next order increasing step.
+        The function fills a table of the computed approximations to reuse in the next order-increasing step.
         """
         T_extrap = T_fine_first_order
 
-        # perform repeated Richardson extrapolation until the target order has been reached, T_table_k contains lower resolution approximations from previous extrapolation step
-        for j in range(0, k_target+1):
+        # perform repeated Richardson extrapolation until the target order has been reached,
+        # T_table_k starts with lower resolution approximations from a previous extrapolation
+        # step and is progressively filled with extrapolated values (and the low order solver result)
+        for j in range(0, k):
+            # extraction from array for readability:
             T_coarselow = T_table_k[j]
             T_finelow = T_extrap
+
             T_extrap = (
-                T_finelow
-                + (T_finelow - T_coarselow) * self.coeffs_Aitken[n_columns-1, j] # TODO: ugly unmatched indices: massage, rename n_col (actual number of cols is ncol+1)
+                T_finelow + (T_finelow - T_coarselow) * self.coeffs_Aitken[k - 1, j]
             )
             T_table_k[j] = T_finelow
-        T_table_k[n_columns] = T_extrap
+        T_table_k[k] = T_extrap
 
     def extrapolation_step(
         self,
@@ -326,6 +328,8 @@ class ExtrapolationSolver(ABC):
             k_target = params_step0[0]
             step = params_step0[1]
 
+        logger.debug(f"Beginning solve with h = {step}, k = {k_target}")
+
         time = [t0]
         solution = [x0]
 
@@ -373,20 +377,6 @@ class ExtrapolationSolver(ABC):
         )
 
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
-
-    # @overload
-    # def _fevals_per_base_solve(self, steps: int) -> int:
-    #     pass
-
-    # @overload
-    # def _fevals_per_base_solve(self, steps: NDArray[np.integer]) -> NDArray[np.integer]:
-    #     pass
-
-    # @abstractmethod
-    # def _fevals_per_base_solve(
-    #     self, steps: int | NDArray[np.integer]
-    # ) -> int | NDArray[np.integer]:
-    #     raise NotImplementedError()
 
     @abstractmethod
     def _feval_cost_per_base_solve(
