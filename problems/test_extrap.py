@@ -22,18 +22,6 @@ logger_pil.setLevel(logging.INFO)
 cmap = plt.get_cmap("tab20")
 
 
-# x_dot = lambda t, x: np.array(
-#     [
-#         2 * t * x[0] * np.log(np.maximum(x[1], 1e-3)),
-#         -2 * t * x[1] * np.log(np.maximum(x[0], 1e-3)),
-#     ]
-# )
-
-# t_max = 5.0
-# x0 = np.array([1.0, np.e])
-
-# x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
-
 x_dot = lambda t, x: np.array(
     [
         2 * t * x[0] * np.log(np.maximum(x[1], 1e-3)),
@@ -53,8 +41,8 @@ results["DP45"] = DP45(
     x0,
     t_max,
     h_limits=(1e-16, np.inf),
-    atol=1e-5,
-    rtol=1e-3,
+    atol=1e-7,
+    rtol=1e-5,
 )
 h_average = t_max / len(
     results["DP45"][0]
@@ -62,14 +50,14 @@ h_average = t_max / len(
 results["AB_5"] = AB_k(x_dot, x0, t_max, h=h_average, k=5)
 
 solver_eulex = EulerExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 )
 results["EULEX"] = solver_eulex.solve(x0, t_max)
 
 solver_eulex_quad = EulerExtrapolation(
     x_dot,
     table_size=8,
-    step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3),
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
     dtype=np.longdouble,
 )
 results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
@@ -120,7 +108,7 @@ axes[0].set_ylim(-5, 5)
 axes[1].set_yscale("log")
 axes[1].set_ylabel("error")
 axes[2].set_xlabel("time")
-axes[2].set_ylabel("$\Delta t$")
+axes[2].set_ylabel(r"$\Delta t$")
 
 t_ref = np.linspace(0, t_max, 101)
 axes[0].plot(

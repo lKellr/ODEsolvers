@@ -89,7 +89,7 @@ class ExtrapolationSolver(ABC):
             j = 1
             while len(n_list) < table_size:
                 candidate = 4 * j + 2
-                if n_list[-1] / candidate <= 5 / 7:
+                if n_list[-1] / candidate <= alpha:
                     n_list.append(candidate)
                 j += 1
             substep_seq = np.array(n_list)
@@ -296,7 +296,7 @@ class ExtrapolationSolver(ABC):
         #     iterator_table
         # )  # TODO: check this
         step_info["n_lu"] = iterator_table
-        step_info["n_jaceval"] = 1
+        step_info["n_jaceval"] = 1 * self.require_jacobian
         step_info["local_error"] = err
         step_info["max_substeps"] = self.substep_seq[iterator_table]
         return (
@@ -395,10 +395,8 @@ class ExtrapolationSolver(ABC):
     @abstractmethod
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts | None,
     ) -> NDArray[np.floating]:
-        return substep_seq * 1.0
+        return self.substep_seq * 1.0
 
     @abstractmethod
     def base_scheme(
@@ -410,11 +408,6 @@ class ExtrapolationSolver(ABC):
         jac0: NDArray[np.floating] | None,
     ) -> tuple[NDArray[np.floating], bool]:
         raise NotImplementedError()
-
-
-class ExtrapolationSolverImplicit(ExtrapolationSolver, ABC):
-    """Child class that supports implicit schemes and ODEs"""
-
 
 class EulerExtrapolation(ExtrapolationSolver):
     """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner"""
@@ -443,10 +436,8 @@ class EulerExtrapolation(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts | None,
     ) -> NDArray[np.floating]:
-        return substep_seq * 1.0
+        return self.substep_seq * 1.0
 
     @override
     def base_scheme(
@@ -507,10 +498,8 @@ class EulerExtrapolationMass(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
     ) -> NDArray[np.floating]:
-        return substep_seq * (1.0 + implicit_rel_costs.rel_backsub_cost)
+        return self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
 
     @override
     def base_scheme(
@@ -569,10 +558,8 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts | None = None,
     ) -> NDArray[np.floating]:
-        return (substep_seq + self.use_smoothing) * 1.0
+        return (self.substep_seq + self.use_smoothing) * 1.0
 
     @override
     def base_scheme(
@@ -640,11 +627,9 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts | None = None,
     ) -> NDArray[np.floating]:
-        return (substep_seq + self.use_smoothing) * (
-            1.0 + implicit_rel_costs.rel_backsub_cost
+        return (self.substep_seq + self.use_smoothing) * (
+            1.0 + self.implicit_rel_costs.rel_backsub_cost
         )
 
     @override
@@ -740,16 +725,14 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
     ) -> NDArray[np.floating]:
         return (
-            substep_seq
+            self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
+            + self.implicit_rel_costs.rel_lu_cost
+            + (self.implicit_rel_costs.rel_backsub_cost + 1.0)
             * (
-                1.0
-                + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)
-            )
-            + implicit_rel_costs.rel_lu_cost
+                np.arange(self.table_size) == 1
+            )  # cost of stability check (lu_backsub + norm)
         )
 
     @override
@@ -843,12 +826,13 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
     @override
     def _feval_cost_per_base_solve(
         self,
-        substep_seq: NDArray[np.integer],
-        implicit_rel_costs: ImplicitRelCosts,
     ) -> NDArray[np.floating]:
-        return (substep_seq + self.use_smoothing) * (
-            1.0 + implicit_rel_costs.rel_backsub_cost * (self.mass_matrix is not None)
-        ) + implicit_rel_costs.rel_lu_cost
+        return (
+            (self.substep_seq + self.use_smoothing)
+            * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
+            + self.implicit_rel_costs.rel_lu_cost
+            + 1.0 * (np.arange(self.table_size) == 1)
+        )  # cost of stability check (norm)
 
     @override
     def base_scheme(
