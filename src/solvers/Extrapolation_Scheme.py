@@ -412,7 +412,7 @@ class EulerExtrapolation(ExtrapolationSolver):
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
         table_size: int = 10,
         step_controller: StepControllerExtrap | None = None,
-        step_seq: (
+        substep_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic",
@@ -420,7 +420,7 @@ class EulerExtrapolation(ExtrapolationSolver):
     ):
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=False,
             table_size=table_size,
             step_controller=step_controller,
@@ -467,7 +467,7 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         mass_matrix: NDArray[np.floating],
         table_size: int = 10,
         step_controller: StepControllerExtrap | None = None,
-        step_seq: (
+        substep_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic",
@@ -476,7 +476,7 @@ class EulerExtrapolationMass(ExtrapolationSolver):
     ):
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=False,
             table_size=table_size,
             step_controller=step_controller,
@@ -537,7 +537,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         table_size: int = 10,
         step_controller: StepControllerExtrap | None = None,
         use_smoothing: bool = False,
-        step_seq: (
+        substep_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic",
@@ -546,7 +546,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         self.use_smoothing = use_smoothing
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=True,
             table_size=table_size,
             step_controller=step_controller,
@@ -599,7 +599,7 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         table_size: int = 10,
         step_controller: StepControllerExtrap | None = None,
         use_smoothing: bool = False,
-        step_seq: (
+        substep_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic",
@@ -609,7 +609,7 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         self.use_smoothing = use_smoothing
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=True,
             table_size=table_size,
             step_controller=step_controller,
@@ -691,7 +691,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
         ) = None,
         step_controller: StepControllerExtrap | None = None,
-        step_seq: (
+        substep_seq: (
             NDArray[np.integer]
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic2",
@@ -701,7 +701,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
     ):
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=False,
             table_size=table_size,
             step_controller=step_controller,
@@ -789,7 +789,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         ) = None,
         step_controller: StepControllerExtrap | None = None,
         use_smoothing: bool = False,
-        step_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
+        substep_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
         mass_matrix: NDArray[np.floating] | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
@@ -797,7 +797,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         self.use_smoothing = use_smoothing
         super().__init__(
             ode_fun=ode_fun,
-            substep_seq=step_seq,
+            substep_seq=substep_seq,
             is_symmetric=True,
             table_size=table_size,
             step_controller=step_controller,
