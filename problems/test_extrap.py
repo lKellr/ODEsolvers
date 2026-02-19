@@ -45,18 +45,18 @@ h = t_max / len(
 )  # use the same number of steps as the adaptive scheme
 results["AB_5"] = AB_k(x_dot, x0, t_max, h, k=5)
 
-solver_eulex = EulerExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapKH()
-)
-results["EULEX"] = solver_eulex.solve(x0, t_max)
-
-# solver_eulex_step = EulerExtrapolation(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapK()
+# solver_eulex = EulerExtrapolation(
+#     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
 # )
-# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
+# results["EULEX"] = solver_eulex.solve(x0, t_max)
+
+solver_eulex_step = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-5, rtol=1e-3)
+)
+results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
 
 # solver_eulex_ord = EulerExtrapolation(
-#     x_dot, table_size=4, step_controller=StepControllerExtrapH()
+#     x_dot, table_size=4, step_controller=StepControllerExtrapH(atol=1e-5, rtol=1e-3)
 # )
 # results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
 

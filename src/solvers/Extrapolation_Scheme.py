@@ -276,7 +276,7 @@ class ExtrapolationSolver(ABC):
                     T_table_k[iterator_table],
                 )
 
-            # divergence monitor, TODO: only required for implicit methods
+            # divergence monitor, only required for implicit methods
             if self.require_jacobian and (
                 is_diverging or (iterator_table >= 2 and np.any(err >= err_prev))
             ):  # Hairer & Wanner divergence monitor a)
@@ -339,7 +339,9 @@ class ExtrapolationSolver(ABC):
                 current_time + step > t_max
             ):  # shorten h if we would go further than necessary
                 step = t_max - current_time
-            logger.debug(f"Starting step at time {current_time} of {t_max}")
+            logger.debug(
+                f"Starting step at time {current_time} of {t_max} with k_target = {k_target}, h = {step:.2E}"
+            )
 
             # do step
             new_solution, k_target, step, accepted, step_info = self.extrapolation_step(
@@ -367,7 +369,7 @@ class ExtrapolationSolver(ABC):
                 time.append(current_time)
                 current_time += step
             else:
-                logger.debug(f"Retrying step with h = {step}")
+                logger.debug(f"Retrying step with h = {step:.2E}")
 
         # finished
         logger.debug(
@@ -396,6 +398,10 @@ class ExtrapolationSolver(ABC):
         jac0: NDArray[np.floating] | None,
     ) -> tuple[NDArray[np.floating], bool]:
         raise NotImplementedError()
+
+
+class ExtrapolationSolverImplicit(ExtrapolationSolver, ABC):
+    """Child class that supports implicit schemes and ODEs"""
 
 
 class EulerExtrapolation(ExtrapolationSolver):
@@ -546,6 +552,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
+        self._init_controller()
 
     @override
     def _feval_cost_per_base_solve(
@@ -614,6 +621,7 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
+        self._init_controller()
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
 
@@ -707,6 +715,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
+        self._init_controller()
 
     @override
     def _feval_cost_per_base_solve(
@@ -803,6 +812,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
+        self._init_controller()
 
     @override
     def _feval_cost_per_base_solve(
