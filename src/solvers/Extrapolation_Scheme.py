@@ -78,12 +78,17 @@ class ExtrapolationSolver(ABC):
         ):  # this sequence would allow for dense output, form Numerical Recipes
             substep_seq = np.array(range(2, 4 * table_size, 4))
         elif substep_seq == "SODEX":
-            assert (
-                table_size <= 7
-            ), "table sizes larger than 7 are not implemented when using the step sequence SODEX"
-            substep_seq = np.array(
-                [2, 6, 10, 14, 22, 34, 50][:table_size]
-            )  # NOTE: i am not sure if a formula exists for these; they have to be multiples of even numbers, according to Bader&Deulfhard1983, the ratio of subsequent entries must lie between 1 and 5/7
+            # according to Bader&Deulfhard1983, the ratio of subsequent entries must be greater
+            # than 7/5 (empirical value) and they should all be even (+ a stronger restriction n_i = 2*(2*i+1))
+            alpha = 5 / 7
+            n_list = [2]
+            j = 1
+            while len(n_list) < table_size:
+                candidate = 4 * j + 2
+                if n_list[-1] / candidate <= 5 / 7:
+                    n_list.append(candidate)
+                j += 1
+            substep_seq = np.array(n_list)
         else:
             raise ValueError(f"step sequence of type {substep_seq} is not available.")
 
@@ -156,7 +161,7 @@ class ExtrapolationSolver(ABC):
         if mass_matrix is None:
             self.mass_matrix = np.identity(num_odes)
         else:
-            mm_shape = self.mass_matrix.shape
+            mm_shape = mass_matrix.shape
             assert (
                 len(mm_shape) == 2
                 and (mm_shape[0] == mm_shape[1])
@@ -308,8 +313,9 @@ class ExtrapolationSolver(ABC):
         t_max: float,
         t0: float = 0,
         k_initial: int | None = None,
-        h_initial: int | None = None,
+        h_initial: float | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+        """Solve the ODE with initial condition x0 from time t0 to t_max. If initial step size and order are not specified, heuristics provided by the step controller are used"""
 
         solve_info: dict[str, Any] = dict(
             n_feval=0,
@@ -320,14 +326,18 @@ class ExtrapolationSolver(ABC):
 
         k_target: int
         step: float
-        if params_step0 is None:
+
+        if k_initial is None:
             k_target = self.step_controller.get_initial_ktarget()
+        else:
+            k_target = k_initial
+
+        if h_initial is None:
             step = self.step_controller.get_initial_stepHW(
                 self.ode_fun, x0, t0=t0, p=k_target
             )
         else:
-            k_target = params_step0[0]
-            step = params_step0[1]
+            step = h_initial
 
         logger.debug(f"Beginning solve with h = {step}, k = {k_target}")
 
@@ -371,6 +381,7 @@ class ExtrapolationSolver(ABC):
                 current_time += step
             else:
                 logger.debug(f"Retrying step with h = {step:.2E}")
+                solve_info["n_restarts"] += 1
 
         # finished
         logger.debug(
@@ -697,6 +708,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
         ) = "harmonic2",
         mass_matrix: NDArray[np.floating] | None = None,
+        num_odes: int | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
@@ -709,9 +721,16 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             dtype=dtype,
         )
         self.norm = self.step_controller.norm
+
+        if num_odes is None:
+            assert (
+                mass_matrix is not None
+            ), "either mass matrix or the number of ODEs has to be specified"
+            num_odes = mass_matrix.shape[0]
+
         self._init_implicit(
-            num_odes=num_odes,
-            require_jacobian=False,
+            num_odes=num_odes,  # type: ignore
+            require_jacobian=True,
             jac_fun=jac_fun,
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
@@ -792,6 +811,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         use_smoothing: bool = False,
         substep_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
         mass_matrix: NDArray[np.floating] | None = None,
+        num_odes: int | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
@@ -806,9 +826,14 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         )
         self.norm = self.step_controller.norm
 
+        if num_odes is None:
+            assert (
+                mass_matrix is not None
+            ), "either mass matrix or the number of ODEs has to be specified"
+            num_odes = mass_matrix.shape[0]
         self._init_implicit(
-            num_odes=num_odes,
-            require_jacobian=False,
+            num_odes=num_odes,  # type: ignore
+            require_jacobian=True,
             jac_fun=jac_fun,
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
@@ -849,7 +874,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
 
         # continue with linearly implicit midpoint
         for n in range(1, n_steps):
-            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
+            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
             delta_x = delta_x + lu_solve(
                 lu_and_piv, rhs, overwrite_b=False, check_finite=False
             )  # TODO: i can not overwrite b here because of the convergence check
@@ -864,7 +889,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         if (
             self.use_smoothing
         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix * delta_x)
+            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
             delta_x = delta_x + lu_solve(
                 lu_and_piv, rhs, overwrite_b=True, check_finite=False
             )

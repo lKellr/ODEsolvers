@@ -1,3 +1,4 @@
+from readline import backend
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -15,9 +16,23 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
+logger_pil = logging.getLogger("PIL")
+logger_pil.setLevel(logging.INFO)
 
 cmap = plt.get_cmap("tab20")
 
+
+# x_dot = lambda t, x: np.array(
+#     [
+#         2 * t * x[0] * np.log(np.maximum(x[1], 1e-3)),
+#         -2 * t * x[1] * np.log(np.maximum(x[0], 1e-3)),
+#     ]
+# )
+
+# t_max = 5.0
+# x0 = np.array([1.0, np.e])
+
+# x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
 
 x_dot = lambda t, x: np.array(
     [
@@ -31,6 +46,7 @@ x0 = np.array([1.0, np.e])
 
 x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
 
+
 results = dict()
 results["DP45"] = DP45(
     x_dot,
@@ -40,26 +56,33 @@ results["DP45"] = DP45(
     atol=1e-5,
     rtol=1e-3,
 )
-h = t_max / len(
+h_average = t_max / len(
     results["DP45"][0]
 )  # use the same number of steps as the adaptive scheme
-results["AB_5"] = AB_k(x_dot, x0, t_max, h, k=5)
+results["AB_5"] = AB_k(x_dot, x0, t_max, h=h_average, k=5)
 
-# solver_eulex = EulerExtrapolation(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
-# )
-# results["EULEX"] = solver_eulex.solve(x0, t_max)
-
-solver_eulex_step = EulerExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-5, rtol=1e-3)
+solver_eulex = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
 )
-results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
+results["EULEX"] = solver_eulex.solve(x0, t_max)
+
+solver_eulex_quad = EulerExtrapolation(
+    x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3),
+    dtype=np.longdouble,
+)
+results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
+
+# solver_eulex_step = EulerExtrapolation(
+#     x_dot, table_size=16, step_controller=StepControllerExtrapK(atol=1e-5, rtol=1e-3)
+# )
+# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
 
 # solver_eulex_ord = EulerExtrapolation(
-#     x_dot, table_size=4, step_controller=StepControllerExtrapH(atol=1e-5, rtol=1e-3)
+#     x_dot, table_size=8, step_controller=StepControllerExtrapH(atol=1e-5, rtol=1e-3)
 # )
-# results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max)
-
+# results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max, k_initial=5)
 
 # solver_eulex_mass = EulerExtrapolationMass(
 #     x_dot, np.identity(2), table_size=4, step_controller=StepControllerExtrapH()
@@ -75,30 +98,39 @@ results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max)
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-# solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=8)
+# solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=8, num_odes=x0.size)
 # results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
-#     x_dot, table_size=20, dtype=np.longdouble
+#     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble
 # )
 # results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
 
-# solver_sodex = LimplicitMidpointExtrapolation(x_dot, table_size=8)
+# solver_sodex = LimplicitMidpointExtrapolation(x_dot, num_odes=x0.size)
 # results["SODEX"] = solver_sodex.solve(x0, t_max)
 
 # solver_sodex_smoothed = LimplicitMidpointExtrapolation(
-#     x_dot, table_size=8, use_smoothing=True
+#     x_dot, table_size=8, num_odes=x0.size, use_smoothing=True
 # )
 # results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
 
 # results
-fig, axes = plt.subplots(2, 1)
+fig, axes = plt.subplots(3, 1, sharex=True, tight_layout=True)
 axes[0].set_ylim(-5, 5)
 axes[1].set_yscale("log")
 axes[1].set_ylabel("error")
+axes[2].set_xlabel("time")
+axes[2].set_ylabel("$\Delta t$")
 
 t_ref = np.linspace(0, t_max, 101)
-axes[0].plot(t_ref, x_analytic(t_ref)[:, 0], label="analyic", linestyle="--")
+axes[0].plot(
+    t_ref,
+    x_analytic(t_ref)[:, 0],
+    label="analyic",
+    color="dimgray",
+    linestyle="--",
+    zorder=10,
+)
 
 for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     axes[0].plot(time, result[:, 0], label=scheme_name, color=cmap(i))
@@ -117,11 +149,17 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
         label=scheme_name,
         color=cmap(i),
     )
+    axes[2].plot(
+        0.5 * (time[1:] + time[:-1]),
+        np.diff(time),
+        label=scheme_name,
+        color=cmap(i),
+    )
 
 plt.legend(frameon=False)
 plt.tight_layout()
 plt.show()
-
+# plt.savefig("./tmp_results.pdf", backend="pgf")
 
 #  efficiency
 fig, ax = plt.subplots()

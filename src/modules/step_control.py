@@ -475,7 +475,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
-        next_k = self.table_size  # first check at next_k-1
+        next_k = k_target  # first check at next_k-1
         state: contr_ext_state_type = "continue"
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
@@ -535,16 +535,21 @@ class StepControllerExtrapK(StepControllerExtrap):
         if err_ratio <= 1.0:
             self.is_retry = False
             state = "accepted"
-        elif err_ratio > np.prod(
-            [
-                self.err_reduction_at_step[k]
-                for k in range(table_col_ix - 1, self.table_size - 1)
-            ]
+        elif (
+            err_ratio
+            > np.prod(
+                [
+                    self.err_reduction_at_step[k]
+                    for k in range(table_col_ix - 1, self.table_size - 1)
+                ]
+            )
+            or table_col_ix == self.table_size - 1
         ):  # b) Convergence monitor: can we expect convergence in later steps?
             self.is_retry = True
             state = "too_slow_convergence"
             next_step_mult = (
                 self.step_multiplier_divergence
             )  # we have to reduce the step size even though we try to keep it constant
+            # as error tolerance can't be reached with the current step size and table size
 
         return next_k, next_step_mult, state
