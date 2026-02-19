@@ -37,6 +37,10 @@ class ImplicitRelCosts(NamedTuple):
 
 
 class ExtrapolationSolver(ABC):
+    # these will be initialized in _init_implicit()
+    mass_matrix: NDArray[np.floating]
+    implicit_rel_costs: ImplicitRelCosts
+    jac_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]]
 
     def __init__(
         self,
@@ -118,11 +122,7 @@ class ExtrapolationSolver(ABC):
             dtype,
         )
 
-        # these will be initialized in _init_implicit()
-        self.implicit_rel_costs = None
         self.require_jacobian = False
-        self.jac_fun = None
-        self.mass_matrix = None
 
         if step_controller is None:
             step_controller = StepControllerExtrapKH(
@@ -148,16 +148,16 @@ class ExtrapolationSolver(ABC):
             self.implicit_rel_costs = implicit_rel_costs
 
         self.require_jacobian = require_jacobian
-        if jac_fun is None:
-            self.jac_fun: Callable[
-                [float, NDArray[np.floating]], NDArray[np.floating]
-            ] = lambda t, x: numerical_jacobian_t(t, x, self.ode_fun, delta=1e-8)
+        if jac_fun is None and self.require_jacobian:
+            self.jac_fun = lambda t, x: numerical_jacobian_t(
+                t, x, self.ode_fun, delta=1e-8
+            )
             if implicit_rel_costs is None:
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
         else:
             self.jac_fun = jac_fun
 
-        self.mass_matrix: NDArray[np.floating]
+        self.mass_matrix
         if mass_matrix is None:
             self.mass_matrix = np.identity(num_odes)
         else:
