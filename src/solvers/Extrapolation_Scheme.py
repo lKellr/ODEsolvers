@@ -256,7 +256,7 @@ class ExtrapolationSolver(ABC):
             T_fine_first_order, is_diverging = self.base_scheme(
                 x_curr,
                 t_curr,
-                t_max=step_size,
+                t_max=t_curr + step_size,
                 n_steps=self.substep_seq[iterator_table],
                 jac0=jac0,
             )
@@ -307,7 +307,8 @@ class ExtrapolationSolver(ABC):
         x0: NDArray[np.floating],
         t_max: float,
         t0: float = 0,
-        params_step0: tuple[int, float] | None = None,
+        k_initial: int | None = None,
+        h_initial: int | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
 
         solve_info: dict[str, Any] = dict(
