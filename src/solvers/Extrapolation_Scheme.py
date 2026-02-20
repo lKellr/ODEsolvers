@@ -1,25 +1,22 @@
 from abc import ABC, abstractmethod
+from functools import cached_property
 from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
-from numpy import float64, floating, integer
 from typing import (
     Any,
     Callable,
     Literal,
     NamedTuple,
-    TypeVar,
-    assert_type,
-    overload,
     override,
 )
 import numpy as np
-from numpy.typing import ArrayLike, DTypeLike, NDArray
+from numpy.typing import DTypeLike, NDArray
 import logging
 
 from scipy.linalg import lu_factor, lu_solve
 
-from modules.helpers import clip, numerical_jacobian, norm_hairer, numerical_jacobian_t
+from modules.helpers import numerical_jacobian_t
 
 from modules.step_control import (
     StepControllerExtrap,
@@ -320,7 +317,7 @@ class ExtrapolationSolver(ABC):
         solve_info: dict[str, Any] = dict(
             n_feval=0,
             n_jaceval=0,
-            n_lu=0,
+            n_lu=0, # initial one for implicit ODEs is not counted
             n_restarts=0,
         )
 
@@ -376,9 +373,9 @@ class ExtrapolationSolver(ABC):
             )
 
             if accepted:
+                current_time += step
                 solution.append(new_solution)
                 time.append(current_time)
-                current_time += step
             else:
                 logger.debug(f"Retrying step with h = {step:.2E}")
                 solve_info["n_restarts"] += 1

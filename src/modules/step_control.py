@@ -244,7 +244,7 @@ class StepControllerExtrap(StepController, ABC):
         self.total_feval_cost_for_k = total_feval_cost_for_k
 
     def get_initial_ktarget(self) -> int:
-        """very rough estimate from numerical recipes, can be taken for example from Hairer&Wanner Fig.9.5"""
+        """very rough estimate from numerical recipes, can be motivated for example from Hairer&Wanner Fig.9.5"""
         log_fact = -max(-12.0, np.log10(self.rtol)) * 0.6 + 0.5
         k_target = max(1, min(self.table_size - 1, int(log_fact)))
         return k_target
