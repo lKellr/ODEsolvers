@@ -118,6 +118,7 @@ class ExtrapolationSolver(ABC):
             ],
             dtype,
         )
+        self.n_fevals = np.cumsum([self._fevals_per_base_solve(n_ss) for n_ss in substep_seq]) # cached for solve_info
 
         self.require_jacobian = False
 
@@ -289,10 +290,8 @@ class ExtrapolationSolver(ABC):
 
         step_info["stop_reason"] = state
         logger.debug(step_info["stop_reason"])
-        # step_info["n_feval"] = self._fevals_per_base_solve(
-        #     iterator_table
-        # )  # TODO: check this
-        step_info["n_lu"] = iterator_table
+        step_info["n_feval"] = self.n_fevals[iterator_table]
+        step_info["n_lu"] = self.require_jacobian*(iterator_table+1) # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.require_jacobian
         step_info["local_error"] = err
         step_info["max_substeps"] = self.substep_seq[iterator_table]
@@ -390,6 +389,13 @@ class ExtrapolationSolver(ABC):
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
     @abstractmethod
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps
+    
+    @abstractmethod
     def _feval_cost_per_base_solve(
         self,
     ) -> NDArray[np.floating]:
@@ -431,11 +437,18 @@ class EulerExtrapolation(ExtrapolationSolver):
         self._init_controller()
 
     @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps
+    
+    @override
     def _feval_cost_per_base_solve(
         self,
     ) -> NDArray[np.floating]:
         return self.substep_seq * 1.0
-
+    
     @override
     def base_scheme(
         self,
@@ -492,6 +505,13 @@ class EulerExtrapolationMass(ExtrapolationSolver):
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
 
+    @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps
+    
     @override
     def _feval_cost_per_base_solve(
         self,
@@ -551,6 +571,13 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             dtype=dtype,
         )
         self._init_controller()
+
+    @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps + self.use_smoothing
 
     @override
     def _feval_cost_per_base_solve(
@@ -620,6 +647,13 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         self._init_controller()
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
+
+    @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps + self.use_smoothing
 
     @override
     def _feval_cost_per_base_solve(
@@ -718,6 +752,13 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             implicit_rel_costs=implicit_rel_costs,
         )
         self._init_controller()
+
+    @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps
 
     @override
     def _feval_cost_per_base_solve(
@@ -820,6 +861,13 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         )
         self._init_controller()
 
+    @override
+    def _fevals_per_base_solve(
+        self,
+        n_substeps: int
+    ) -> int:
+        return n_substeps + self.use_smoothing
+    
     @override
     def _feval_cost_per_base_solve(
         self,
