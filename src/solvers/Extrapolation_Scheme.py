@@ -152,7 +152,8 @@ class ExtrapolationSolver(ABC):
             )
             if implicit_rel_costs is None:
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
-        else:
+        elif self.require_jacobian:
+            assert jac_fun is not None
             self.jac_fun = jac_fun
 
         self.mass_matrix
@@ -190,7 +191,12 @@ class ExtrapolationSolver(ABC):
             self.table_size, err_reduction_at_step, total_feval_cost_for_k
         )
 
-    def fill_extrapolation_table(self, T_fine_first_order, T_table_k, k) -> None:
+    def fill_extrapolation_table(
+        self,
+        T_fine_first_order: NDArray[np.floating],
+        T_table_k: NDArray[np.floating],
+        k: int,
+    ) -> None:
         """Increases the accuracy of the estimate for x0 by one order in the stepsize with the help of Richardson extrapolation.
         For this, the number of steps has to be increased over the previous order. Approximations of all orders lower than the target order are computed with this number of steps.
         The function fills a table of the computed approximations to reuse in the next order-increasing step.
@@ -780,9 +786,11 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating],
+        jac0: NDArray[np.floating] | None,
     ) -> tuple[NDArray[np.floating], bool]:
         r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) x^{n+1} = \Delta t f(x^n) with a constant jacobian evaluated at x0"""
+        assert jac0 is not None
+        
         delta_t = (t_max - t0) / n_steps
         lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
 
@@ -886,9 +894,11 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating],
+        jac0: NDArray[np.floating] | None
     ) -> tuple[NDArray[np.floating], bool]:
         """linearly implicit midpoint scheme with optional Gragg-smoothing"""
+        assert jac0 is not None
+
         delta_t = (t_max - t0) / n_steps
         lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
 
