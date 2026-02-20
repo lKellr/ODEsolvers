@@ -14,11 +14,11 @@ from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
 
-# logging.basicConfig(level=logging.DEBUG)
-# logger_mpb = logging.getLogger("matplotlib")
-# logger_mpb.setLevel(logging.INFO)
-# logger_pil = logging.getLogger("PIL")
-# logger_pil.setLevel(logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
+logger_mpb = logging.getLogger("matplotlib")
+logger_mpb.setLevel(logging.INFO)
+logger_pil = logging.getLogger("PIL")
+logger_pil.setLevel(logging.INFO)
 
 cmap = plt.get_cmap("tab20")
 
@@ -64,26 +64,77 @@ for n_steps in N_list:
   )
   time, result, solve_info = solver_eulex2.solve(x0, t_max, k_initial=2, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
+  plt.plot(time, result)
+  plt.show()
 conv_data['EULEX2'] = np.array(errors)
 
-# solver_eulex_quad = EulerExtrapolation(
-#     x_dot,
-#     table_size=8,
-#     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-#     dtype=np.longdouble,
-# )
-# results["EULEX7_quad"] = solver_eulex_quad.solve(x0, t_max)
+errors = list()
+for n_steps in N_list:
+  solver_eulex3 = EulerExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+  )
+  time, result, solve_info = solver_eulex3.solve(x0, t_max, k_initial=3, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['EULEX3'] = np.array(errors)
 
-# solver_eulex_step = EulerExtrapolation(
-#     x_dot, table_size=16, step_controller=StepControllerExtrapK(atol=1e-5, rtol=1e-3)
-# )
-# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
+errors = list()
+for n_steps in N_list:
+  solver_eulex5 = EulerExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+  )
+  time, result, solve_info = solver_eulex5.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['EULEX5'] = np.array(errors)
 
-# solver_odex = ModMidpointExtrapolation(x_dot, table_size=8)
-# results["ODEX"] = solver_odex.solve(x0, t_max)
+errors = list()
+for n_steps in N_list:
+  solver_eulex7 = EulerExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+  )
+  time, result, solve_info = solver_eulex7.solve(x0, t_max, k_initial=7, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['EULEX7'] = np.array(errors)
 
-# solver_odex_smoothed = ModMidpointExtrapolation(x_dot, table_size=8, use_smoothing=True)
-# results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
+errors = list()
+for n_steps in N_list:
+  solver_eulex7q = EulerExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+    dtype=np.longdouble
+  )
+  time, result, solve_info = solver_eulex7q.solve(x0, t_max, k_initial=7, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['EULEX7quad'] = np.array(errors)
+
+errors = list()
+for n_steps in N_list:
+  solver_odex5 = ModMidpointExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+  )
+  time, result, solve_info = solver_odex5.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['ODEX5'] = np.array(errors)
+
+errors = list()
+for n_steps in N_list:
+  solver_odex5s = ModMidpointExtrapolation(
+    ode_fun=x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapDummy(),
+    use_smoothing=True
+  )
+  time, result, solve_info = solver_odex5s.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  errors.append(norm(result[-1]-x_analytic(time[-1])))
+conv_data['ODEX5smoothed'] = np.array(errors)
 
 # results
 fig, ax = plt.subplots()
