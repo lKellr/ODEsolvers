@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from functools import cached_property
 from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
 from numpy._typing._array_like import NDArray
@@ -31,6 +30,7 @@ class ImplicitRelCosts(NamedTuple):
     rel_jac_cost: float = 2.0
     rel_lu_cost: float = 1.0
     rel_backsub_cost: float = 0.0
+    norm_cost: float = 0.9
 
 
 class ExtrapolationSolver(ABC):
@@ -170,16 +170,8 @@ class ExtrapolationSolver(ABC):
 
     def _init_controller(
         self,
+        total_feval_cost_for_k: NDArray[np.floating]
     ):
-        total_feval_cost_for_k: NDArray[np.floating] = np.cumsum(
-            self._feval_cost_per_base_solve(
-                self.substep_seq, implicit_rel_costs=self.implicit_rel_costs
-            )
-        )
-
-        if self.require_jacobian:
-            total_feval_cost_for_k += self.implicit_rel_costs.rel_jac_cost
-
         err_reduction_at_step = np.array(
             [
                 (self.substep_seq[k] / self.substep_seq[0]) ** (1 + self.is_symmetric)
@@ -394,18 +386,11 @@ class ExtrapolationSolver(ABC):
 
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
-    @abstractmethod
     def _fevals_per_base_solve(
         self,
         n_substeps: int
     ) -> int:
         return n_substeps
-    
-    @abstractmethod
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return self.substep_seq * 1.0
 
     @abstractmethod
     def base_scheme(
@@ -440,20 +425,8 @@ class EulerExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
-        self._init_controller()
-
-    @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
-        return n_substeps
-    
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return self.substep_seq * 1.0
+        total_feval_cost_for_k = np.cumsum(self.substep_seq * 1.0)
+        self._init_controller(total_feval_cost_for_k)
     
     @override
     def base_scheme(
@@ -507,23 +480,11 @@ class EulerExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        self._init_controller()
+        total_feval_cost_for_k = np.cumsum(self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost))
+        self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
-
-    @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
-        return n_substeps
     
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
-
     @override
     def base_scheme(
         self,
@@ -576,7 +537,8 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
-        self._init_controller()
+        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * 1.0)
+        self._init_controller(total_feval_cost_for_k)
 
     @override
     def _fevals_per_base_solve(
@@ -584,12 +546,6 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         n_substeps: int
     ) -> int:
         return n_substeps + self.use_smoothing
-
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return (self.substep_seq + self.use_smoothing) * 1.0
 
     @override
     def base_scheme(
@@ -650,7 +606,8 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        self._init_controller()
+        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * (1.0 + self.implicit_rel_costs.rel_backsub_cost))
+        self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
 
@@ -660,14 +617,6 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         n_substeps: int
     ) -> int:
         return n_substeps + self.use_smoothing
-
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return (self.substep_seq + self.use_smoothing) * (
-            1.0 + self.implicit_rel_costs.rel_backsub_cost
-        )
 
     @override
     def base_scheme(
@@ -757,27 +706,13 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        self._init_controller()
 
-    @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
-        return n_substeps
-
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return (
-            self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
+        feval_cost_per_k = (self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
             + self.implicit_rel_costs.rel_lu_cost
-            + (self.implicit_rel_costs.rel_backsub_cost + 1.0)
-            * (
-                np.arange(self.table_size) == 1
-            )  # cost of stability check (lu_backsub + norm)
+            + (self.implicit_rel_costs.rel_backsub_cost + self.implicit_rel_costs.norm_cost) * (self.substep_seq >= 2)  # cost of stability check (lu_backsub + norm)
         )
+        total_feval_cost_for_k = np.cumsum(feval_cost_per_k) + self.implicit_rel_costs.rel_jac_cost
+        self._init_controller(total_feval_cost_for_k)
 
     @override
     def base_scheme(
@@ -867,25 +802,16 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        self._init_controller()
 
-    @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
-        return n_substeps + self.use_smoothing
-    
-    @override
-    def _feval_cost_per_base_solve(
-        self,
-    ) -> NDArray[np.floating]:
-        return (
+        feval_cost_per_k =(
             (self.substep_seq + self.use_smoothing)
             * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
             + self.implicit_rel_costs.rel_lu_cost
-            + 1.0 * (np.arange(self.table_size) == 1)
-        )  # cost of stability check (norm)
+            + self.implicit_rel_costs.norm_cost * (self.substep_seq >= 2) # cost of stability check (norm)
+        )  
+        total_feval_cost_for_k = np.cumsum(feval_cost_per_k) +  self.implicit_rel_costs.rel_jac_cost
+        self._init_controller(total_feval_cost_for_k)
+    
 
     @override
     def base_scheme(
