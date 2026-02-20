@@ -549,7 +549,53 @@ class StepControllerExtrapK(StepControllerExtrap):
             state = "too_slow_convergence"
             next_step_mult = (
                 self.step_multiplier_divergence
-            )  # we have to reduce the step size even though we try to keep it constant
-            # as error tolerance can't be reached with the current step size and table size
+            ) 
+            logger.warning(
+                f"Step size reduction as error tolerance can't be reached with the current step size and table size."
+            )
+
+        return next_k, next_step_mult, state
+
+
+class StepControllerExtrapDummy(StepControllerExtrap):
+    """Step size controller that keeps step size and order constant (i.e. does nothing). Used for testing purposes"""
+
+    def __init__(
+        self,
+        atol: float | NDArray[np.floating] = 10**-8,
+        rtol: float | NDArray[np.floating] = 10**-5,
+        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        safety_unscaled: float = (0.94),
+        safety_tol: float = (0.65),
+        s_limits_scaled: tuple[float, float] = (0.02, 4.0),
+        step_multiplier_divergence: float = 0.5,
+        dtype: DTypeLike = np.double,
+    ) -> None:
+        super().__init__(
+            atol,
+            rtol,
+            norm,
+            safety_unscaled,
+            safety_tol,
+            s_limits_scaled,
+            step_multiplier_divergence,
+            dtype,
+        )
+
+    @override
+    def evaluate_step(
+        self,
+        table_col_ix: int,
+        k_target: int,
+        error: NDArray[np.floating],
+        x_curr: NDArray[np.floating],
+        x_table: NDArray[np.floating],
+    ) -> tuple[int, float, contr_ext_state_type]:
+        next_step_mult = 1.0  # we do not want to change the step size
+        next_k = k_target
+        state: contr_ext_state_type = "continue"
+
+        if table_col_ix >= k_target:
+            state = "accepted"
 
         return next_k, next_step_mult, state
