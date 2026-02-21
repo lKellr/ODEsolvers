@@ -105,9 +105,9 @@ class ExtrapolationSolver(ABC):
                     (
                         (
                             1.0
-                            / (self.substep_seq[k] / self.substep_seq[k - j])
+                            / ((self.substep_seq[k] / self.substep_seq[k - j])
                             ** (2 if self.is_symmetric else 1)
-                            - 1.0
+                            - 1.0)
                         )
                         if j <= k
                         else None  # will be cast to NaN
