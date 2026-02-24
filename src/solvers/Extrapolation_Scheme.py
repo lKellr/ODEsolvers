@@ -62,22 +62,33 @@ class ExtrapolationSolver(ABC):
             ), f"substep_sequence must contain at least as many entries as the table size k={table_size}, current size: {len(substep_seq)}"
             substep_seq = np.array(substep_seq, dtype=int)
         elif substep_seq == "harmonic":
-            substep_seq = np.array(range(1, table_size + 1))
+            substep_seq = np.array(range(1, table_size + 1), dtype=int)
+        elif substep_seq == "harmonic_even":
+            substep_seq = 2*np.array(range(1, table_size + 1), dtype=int)
         elif substep_seq == "Romberg":
-            substep_seq = np.array([i**2 for i in range(table_size + 1)])
+            substep_seq = np.array([2**i for i in range(table_size + 1)], dtype=int)
+        elif substep_seq == "Romberg_even":
+            substep_seq = 2*np.array([2**i for i in range(table_size + 1)], dtype=int)
         elif substep_seq == "Bulirsch":
             substep_seq = np.array(
                 [
-                    2 ** (k // 2) if k == 1 or k % 2 == 0 else 1.5 * 2 ** (k // 2)
+                    2 ** (k // 2) if k % 2 == 0 else 1.5 * 2 ** (k // 2)
                     for k in range(1, table_size + 1)
-                ]
+                ], dtype=int
+            )
+        elif substep_seq == "Bulirsch_even":
+            substep_seq = 2*np.array(
+                [
+                    2 ** (k // 2) if k % 2 == 0 else 1.5 * 2 ** (k // 2)
+                    for k in range(1, table_size + 1)
+                ], dtype=int
             )
         elif substep_seq == "harmonic2":
-            substep_seq = np.array(range(2, table_size + 2))
+            substep_seq = np.array(range(2, table_size + 2), dtype=int)
         elif (
             substep_seq == "fours"
         ):  # this sequence would allow for dense output, form Numerical Recipes
-            substep_seq = np.array(range(2, 4 * table_size, 4))
+            substep_seq = np.array(range(2, 4 * table_size, 4), dtype=int)
         elif substep_seq == "SODEX":
             # according to Bader&Deulfhard1983, the ratio of subsequent entries must be greater
             # than 7/5 (empirical value) and they should all be even (+ a stronger restriction n_i = 2*(2*i+1))
@@ -89,15 +100,17 @@ class ExtrapolationSolver(ABC):
                 if n_list[-1] / candidate <= alpha:
                     n_list.append(candidate)
                 j += 1
-            substep_seq = np.array(n_list)
+            substep_seq = np.array(n_list, dtype=int)
         else:
             raise ValueError(f"step sequence of type {substep_seq} is not available.")
 
+        if is_symmetric:
+            assert (substep_seq%2 == 0).all(), "step sequence for symmetric methods must be even to reach expected convergence rates"
+        self.substep_seq = substep_seq
+        self.is_symmetric = is_symmetric
         self.table_size: int = table_size
         self.dtype = dtype
 
-        self.substep_seq = substep_seq
-        self.is_symmetric = is_symmetric
         # not all entries are needed, only the lower? triangular part and only beginning from j=1, but i cant index a list, so this has to be a padded array
         self.coeffs_Aitken = np.array(
             [
@@ -105,9 +118,7 @@ class ExtrapolationSolver(ABC):
                     (
                         (
                             1.0
-                            / ((self.substep_seq[k] / self.substep_seq[k - j])
-                            ** (2 if self.is_symmetric else 1)
-                            - 1.0)
+                            / ((self.substep_seq[k] / self.substep_seq[k - j]) ** (1 + self.is_symmetric) - 1.0)
                         )
                         if j <= k
                         else None  # will be cast to NaN
@@ -118,7 +129,7 @@ class ExtrapolationSolver(ABC):
             ],
             dtype,
         )
-        self.n_fevals = np.cumsum([self._fevals_per_base_solve(n_ss) for n_ss in substep_seq]) # cached for solve_info
+        self.n_fevals = np.cumsum([self._fevals_per_base_solve(n_ss) for n_ss in substep_seq], dtype=int) # cached for solve_info
 
         self.require_jacobian = False
 
@@ -148,7 +159,7 @@ class ExtrapolationSolver(ABC):
         self.require_jacobian = require_jacobian
         if jac_fun is None and self.require_jacobian:
             self.jac_fun = lambda t, x: numerical_jacobian_t(
-                t, x, self.ode_fun, delta=1e-8
+                t, x, self.ode_fun, delta=1e-12
             )
             if implicit_rel_costs is None:
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
@@ -158,7 +169,7 @@ class ExtrapolationSolver(ABC):
 
         self.mass_matrix
         if mass_matrix is None:
-            self.mass_matrix = np.identity(num_odes)
+            self.mass_matrix = np.identity(num_odes, dtype=self.dtype)
         else:
             mm_shape = mass_matrix.shape
             assert (
@@ -176,8 +187,7 @@ class ExtrapolationSolver(ABC):
             [
                 (self.substep_seq[k] / self.substep_seq[0]) ** (1 + self.is_symmetric)
                 for k in range(self.table_size - 1)
-            ]
-        )
+            ], dtype=self.dtype)
 
         self.step_controller.initialize_scheme(
             self.table_size, err_reduction_at_step, total_feval_cost_for_k
@@ -233,7 +243,7 @@ class ExtrapolationSolver(ABC):
         if (
             self.require_jacobian
         ):  # TODO: recompute only if theta is above some tolerance
-            jac0 = self.jac_fun(t_curr, x_curr.astype(self.dtype))
+            jac0 = self.jac_fun(t_curr, x_curr)
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
         T_table_k = np.empty((self.table_size, x_curr.shape[0]), self.dtype)
@@ -336,7 +346,7 @@ class ExtrapolationSolver(ABC):
         logger.debug(f"Beginning solve with h = {step}, k = {k_target}")
 
         time = [t0]
-        solution = [x0]
+        solution = [x0.astype(self.dtype)]
 
         current_time = t0
         while current_time < t_max:
@@ -425,7 +435,7 @@ class EulerExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
-        total_feval_cost_for_k = np.cumsum(self.substep_seq * 1.0)
+        total_feval_cost_for_k = np.cumsum(self.substep_seq * 1.0, dtype=self.dtype)
         self._init_controller(total_feval_cost_for_k)
     
     @override
@@ -480,7 +490,7 @@ class EulerExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        total_feval_cost_for_k = np.cumsum(self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost))
+        total_feval_cost_for_k = np.cumsum(self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost), dtype=self.dtype)
         self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
@@ -524,8 +534,8 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         use_smoothing: bool = False,
         substep_seq: (
             NDArray[np.integer]
-            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-        ) = "harmonic",
+            | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic_even",
         dtype: DTypeLike = np.double,
     ):
         self.use_smoothing = use_smoothing
@@ -537,7 +547,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
-        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * 1.0)
+        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * 1.0, dtype=self.dtype)
         self._init_controller(total_feval_cost_for_k)
 
     @override
@@ -586,8 +596,8 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         use_smoothing: bool = False,
         substep_seq: (
             NDArray[np.integer]
-            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
-        ) = "harmonic",
+            | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic_even",
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
@@ -606,7 +616,7 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * (1.0 + self.implicit_rel_costs.rel_backsub_cost))
+        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * (1.0 + self.implicit_rel_costs.rel_backsub_cost), dtype=self.dtype)
         self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
@@ -711,7 +721,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             + self.implicit_rel_costs.rel_lu_cost
             + (self.implicit_rel_costs.rel_backsub_cost + self.implicit_rel_costs.norm_cost) * (self.substep_seq >= 2)  # cost of stability check (lu_backsub + norm)
         )
-        total_feval_cost_for_k = np.cumsum(feval_cost_per_k) + self.implicit_rel_costs.rel_jac_cost
+        total_feval_cost_for_k = np.cumsum(feval_cost_per_k, dtype=self.dtype) + self.implicit_rel_costs.rel_jac_cost
         self._init_controller(total_feval_cost_for_k)
 
     @override
@@ -773,7 +783,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         ) = None,
         step_controller: StepControllerExtrap | None = None,
         use_smoothing: bool = False,
-        substep_seq: NDArray[np.integer] | Literal["fours", "SODEX"] = "SODEX",
+        substep_seq: NDArray[np.integer] | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "fours", "SODEX"] = "SODEX",
         mass_matrix: NDArray[np.floating] | None = None,
         num_odes: int | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
@@ -809,7 +819,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             + self.implicit_rel_costs.rel_lu_cost
             + self.implicit_rel_costs.norm_cost * (self.substep_seq >= 2) # cost of stability check (norm)
         )  
-        total_feval_cost_for_k = np.cumsum(feval_cost_per_k) +  self.implicit_rel_costs.rel_jac_cost
+        total_feval_cost_for_k = np.cumsum(feval_cost_per_k, dtype=self.dtype) +  self.implicit_rel_costs.rel_jac_cost
         self._init_controller(total_feval_cost_for_k)
     
 
