@@ -1,4 +1,3 @@
-from readline import backend
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -47,47 +46,46 @@ results["DP45"] = DP45(
 h_average = t_max / len(
     results["DP45"][0]
 )  # use the same number of steps as the adaptive scheme
-results["AB_5"] = AB_k(x_dot, x0, t_max, h=h_average, k=5)
 
 solver_eulex = EulerExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 )
 results["EULEX"] = solver_eulex.solve(x0, t_max)
 
-solver_eulex_quad = EulerExtrapolation(
-    x_dot,
-    table_size=8,
-    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-    dtype=np.longdouble,
+# solver_eulex_quad = EulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+#     dtype=np.longdouble,
+# )
+# results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
+
+solver_eulex_step = EulerExtrapolation(
+    x_dot, table_size=16, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
 )
-results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
+results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
 
-# solver_eulex_step = EulerExtrapolation(
-#     x_dot, table_size=16, step_controller=StepControllerExtrapK(atol=1e-5, rtol=1e-3)
-# )
-# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
+solver_eulex_ord = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5)
+)
+results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max, k_initial=5)
 
-# solver_eulex_ord = EulerExtrapolation(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapH(atol=1e-5, rtol=1e-3)
-# )
-# results["EULEX_const_ord"] = solver_eulex_ord.solve(x0, t_max, k_initial=5)
+solver_eulex_mass = EulerExtrapolationMass(
+    x_dot, np.identity(2), table_size=4, step_controller=StepControllerExtrapH()
+)
+results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
-# solver_eulex_mass = EulerExtrapolationMass(
-#     x_dot, np.identity(2), table_size=4, step_controller=StepControllerExtrapH()
-# )
-# results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
+solver_odex = ModMidpointExtrapolation(x_dot, table_size=8)
+results["ODEX"] = solver_odex.solve(x0, t_max)
 
-# solver_odex = ModMidpointExtrapolation(x_dot, table_size=8)
-# results["ODEX"] = solver_odex.solve(x0, t_max)
-
-# solver_odex_smoothed = ModMidpointExtrapolation(x_dot, table_size=8, use_smoothing=True)
-# results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
+solver_odex_smoothed = ModMidpointExtrapolation(x_dot, table_size=8, use_smoothing=True)
+results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
 
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-# solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=8, num_odes=x0.size)
-# results["SEULEX"] = solver_seulex.solve(x0, t_max)
+solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=8, num_odes=x0.size)
+results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
 #     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble

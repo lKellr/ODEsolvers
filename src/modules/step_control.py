@@ -310,13 +310,13 @@ class StepControllerExtrapKH(StepControllerExtrap):
         super().initialize_scheme(
             table_size, err_reduction_at_step, total_feval_cost_for_k
         )
-        self.err_ratios_k = np.empty((table_size,), self.dtype)
+        self.err_ratios_k = np.empty((table_size-1,), self.dtype)
 
     def _get_most_efficient_params(
         self, err_ratios_k: NDArray[np.floating], k_check: int
     ) -> tuple[int, float]:
-        s_same = self._get_step_mult_opt(err_ratios_k[k_check], k_check)
-        s_decreased = self._get_step_mult_opt(err_ratios_k[k_check - 1], k_check - 1)
+        s_same = self._get_step_mult_opt(err_ratios_k[k_check - 1], k_check)
+        !s_decreased = self._get_step_mult_opt(err_ratios_k[k_check - 2], k_check - 1) # TODO: this can not be calculated for k_check=1
         work_same = (
             self.total_feval_cost_for_k[k_check] / s_same
         )  # NOTE: since the same step length is used with the multiplier, we can calcualte the relative work just from the multipliers
@@ -325,13 +325,13 @@ class StepControllerExtrapKH(StepControllerExtrap):
         next_k: int
         next_s: float
         if (
-            work_decreased < self.work_order_limits[0] * work_same and k_check > 2
+            work_decreased < self.work_order_limits[0] * work_same and !k_check > 2 # TODO: last check required?
         ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
             next_k = k_check - 1  # order decrease
             next_s = s_decreased
         elif (
             work_same < self.work_order_limits[1] * work_decreased
-            and k_check + 1 < self.table_size
+            and k_check + 1 < self.table_size # TODO: i think k_check is the maximum!
         ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. This is probably still accurate since we are close to the optimal value, wheere the work costs are alsomst equal?
             next_k = k_check + 1  # order increase
             next_s = (
@@ -358,12 +358,12 @@ class StepControllerExtrapKH(StepControllerExtrap):
         next_step_mult = -1.0
 
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
-        self.err_ratios_k[table_col_ix] = (
-            err_ratio  # cache this as the computation is kind of expensive
+        self.err_ratios_k[table_col_ix-1] = (
+            err_ratio  # cache this as error computation is expensive
         )
 
         if table_col_ix <= k_target:
-            if err_ratio <= 1.0:  # a) Convergence in line k − 1iterator_target-1
+            if err_ratio <= 1.0:  # a) Convergence in line k_target − 1
                 next_k, next_step_mult = self._get_most_efficient_params(
                     self.err_ratios_k, table_col_ix
                 )
@@ -373,11 +373,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
                     self.is_retry = False
 
                 state = "accepted"
-            elif err_ratio > np.prod(
-                [
-                    self.err_reduction_at_step[k]
-                    for k in range(table_col_ix, k_target + 1)
-                ]
+            elif err_ratio > np.prod(self.err_reduction_at_step[table_col_ix-1:k_target] # TODO: check this product
             ):  # b) Convergence monitor: can we expect convergence in later steps?
                 k_opt, step_mult = self._get_most_efficient_params(
                     self.err_ratios_k, table_col_ix
@@ -537,12 +533,7 @@ class StepControllerExtrapK(StepControllerExtrap):
             state = "accepted"
         elif (
             err_ratio
-            > np.prod(
-                [
-                    self.err_reduction_at_step[k]
-                    for k in range(table_col_ix - 1, self.table_size - 1)
-                ]
-            )
+            > np.prod(self.err_reduction_at_step[table_col_ix - 1:])
             or table_col_ix == self.table_size - 1
         ):  # b) Convergence monitor: can we expect convergence in later steps?
             self.is_retry = True

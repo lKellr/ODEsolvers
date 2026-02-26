@@ -30,10 +30,15 @@ class ImplicitRelCosts(NamedTuple):
     rel_jac_cost: float = 2.0
     rel_lu_cost: float = 1.0
     rel_backsub_cost: float = 0.0
-    norm_cost: float = 0.9
+    norm_cost: float = 0.5
 
 
 class ExtrapolationSolver(ABC):
+    """
+    Base class from which concrete extrapolation schemes can be implemented by providing a suitable base scheme.
+    Additionally, child classes must initialize the controller
+    """
+
     # these will be initialized in _init_implicit()
     mass_matrix: NDArray[np.floating]
     implicit_rel_costs: ImplicitRelCosts
@@ -63,26 +68,22 @@ class ExtrapolationSolver(ABC):
             substep_seq = np.array(substep_seq, dtype=int)
         elif substep_seq == "harmonic":
             substep_seq = np.array(range(1, table_size + 1), dtype=int)
-        elif substep_seq == "harmonic_even":
-            substep_seq = 2*np.array(range(1, table_size + 1), dtype=int)
+            if is_symmetric:
+                substep_seq *= 2
         elif substep_seq == "Romberg":
             substep_seq = np.array([2**i for i in range(table_size + 1)], dtype=int)
-        elif substep_seq == "Romberg_even":
-            substep_seq = 2*np.array([2**i for i in range(table_size + 1)], dtype=int)
+            if is_symmetric:
+                substep_seq *= 2
         elif substep_seq == "Bulirsch":
             substep_seq = np.array(
                 [
                     2 ** (k // 2) if k % 2 == 0 else 1.5 * 2 ** (k // 2)
                     for k in range(1, table_size + 1)
-                ], dtype=int
+                ],
+                dtype=int,
             )
-        elif substep_seq == "Bulirsch_even":
-            substep_seq = 2*np.array(
-                [
-                    2 ** (k // 2) if k % 2 == 0 else 1.5 * 2 ** (k // 2)
-                    for k in range(1, table_size + 1)
-                ], dtype=int
-            )
+            if is_symmetric:
+                substep_seq *= 2
         elif substep_seq == "harmonic2":
             substep_seq = np.array(range(2, table_size + 2), dtype=int)
         elif (
@@ -105,7 +106,9 @@ class ExtrapolationSolver(ABC):
             raise ValueError(f"step sequence of type {substep_seq} is not available.")
 
         if is_symmetric:
-            assert (substep_seq%2 == 0).all(), "step sequence for symmetric methods must be even to reach expected convergence rates"
+            assert (
+                substep_seq % 2 == 0
+            ).all(), "step sequence for symmetric methods must be even to reach expected convergence rates"
         self.substep_seq = substep_seq
         self.is_symmetric = is_symmetric
         self.table_size: int = table_size
@@ -118,7 +121,11 @@ class ExtrapolationSolver(ABC):
                     (
                         (
                             1.0
-                            / ((self.substep_seq[k] / self.substep_seq[k - j]) ** (1 + self.is_symmetric) - 1.0)
+                            / (
+                                (self.substep_seq[k] / self.substep_seq[k - j])
+                                ** (1 + self.is_symmetric)
+                                - 1.0
+                            )
                         )
                         if j <= k
                         else None  # will be cast to NaN
@@ -129,7 +136,9 @@ class ExtrapolationSolver(ABC):
             ],
             dtype,
         )
-        self.n_fevals = np.cumsum([self._fevals_per_base_solve(n_ss) for n_ss in substep_seq], dtype=int) # cached for solve_info
+        self.n_fevals = np.cumsum(
+            [self._fevals_per_base_solve(n_ss) for n_ss in substep_seq], dtype=int
+        )  # cached for solve_info
 
         self.require_jacobian = False
 
@@ -179,15 +188,14 @@ class ExtrapolationSolver(ABC):
             ), "mass matrix must be square and dimensions must match num_odes"
             self.mass_matrix = mass_matrix
 
-    def _init_controller(
-        self,
-        total_feval_cost_for_k: NDArray[np.floating]
-    ):
+    def _init_controller(self, total_feval_cost_for_k: NDArray[np.floating]):
         err_reduction_at_step = np.array(
             [
                 (self.substep_seq[k] / self.substep_seq[0]) ** (1 + self.is_symmetric)
-                for k in range(self.table_size - 1)
-            ], dtype=self.dtype)
+                for k in range(1, self.table_size)
+            ],
+            dtype=self.dtype,
+        )
 
         self.step_controller.initialize_scheme(
             self.table_size, err_reduction_at_step, total_feval_cost_for_k
@@ -299,7 +307,9 @@ class ExtrapolationSolver(ABC):
         step_info["stop_reason"] = state
         logger.debug(step_info["stop_reason"])
         step_info["n_feval"] = self.n_fevals[iterator_table]
-        step_info["n_lu"] = self.require_jacobian*(iterator_table+1) # When a Jacobian is present, i also perform a LU factorization
+        step_info["n_lu"] = self.require_jacobian * (
+            iterator_table + 1
+        )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.require_jacobian
         step_info["local_error"] = err
         step_info["max_substeps"] = self.substep_seq[iterator_table]
@@ -324,7 +334,7 @@ class ExtrapolationSolver(ABC):
         solve_info: dict[str, Any] = dict(
             n_feval=0,
             n_jaceval=0,
-            n_lu=0, # initial one for implicit ODEs is not counted
+            n_lu=0,  # initial one for implicit ODEs is not counted
             n_restarts=0,
         )
 
@@ -348,12 +358,15 @@ class ExtrapolationSolver(ABC):
         time = [t0]
         solution = [x0.astype(self.dtype)]
 
+        allow_full_order_variation = True  # allow quick order variation for first and last steps when target order is not optimal
         current_time = t0
         while current_time < t_max:
             if (
                 current_time + step > t_max
             ):  # shorten h if we would go further than necessary
                 step = t_max - current_time
+                allow_full_order_variation = True
+
             logger.debug(
                 f"Starting step at time {current_time} of {t_max} with k_target = {k_target}, h = {step:.2E}"
             )
@@ -362,13 +375,13 @@ class ExtrapolationSolver(ABC):
             new_solution, k_target, step, accepted, step_info = self.extrapolation_step(
                 current_time,
                 solution[-1],
-                k_target,
+                k_target if not allow_full_order_variation else self.table_size - 1,
                 step,
-                allow_full_order_variation=(current_time <= t0)
-                or (
-                    current_time + step >= t_max
-                ),  # allow quick order variation for first and last steps when target order is not optimal
+                allow_full_order_variation,
             )
+            if allow_full_order_variation:
+                allow_full_order_variation = False
+
             # info
             solve_info["n_feval"] += step_info["n_feval"]
             solve_info["n_jaceval"] += step_info["n_jaceval"]
@@ -396,10 +409,7 @@ class ExtrapolationSolver(ABC):
 
         return np.array(time, self.dtype), np.array(solution, self.dtype), solve_info
 
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
+    def _fevals_per_base_solve(self, n_substeps: int) -> int:
         return n_substeps
 
     @abstractmethod
@@ -413,8 +423,9 @@ class ExtrapolationSolver(ABC):
     ) -> tuple[NDArray[np.floating], bool]:
         raise NotImplementedError()
 
+
 class EulerExtrapolation(ExtrapolationSolver):
-    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner"""
+    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Deuflhard1983 and Hairer1992"""
 
     def __init__(
         self,
@@ -437,7 +448,7 @@ class EulerExtrapolation(ExtrapolationSolver):
         )
         total_feval_cost_for_k = np.cumsum(self.substep_seq * 1.0, dtype=self.dtype)
         self._init_controller(total_feval_cost_for_k)
-    
+
     @override
     def base_scheme(
         self,
@@ -460,8 +471,9 @@ class EulerExtrapolation(ExtrapolationSolver):
 
 
 class EulerExtrapolationMass(ExtrapolationSolver):
-    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Hairer&Wanner.
-    This version allows for the spcification of a mass matrix in implicit ODEs"""
+    """Extrapolation with Euler's method as the underlying scheme. With default config similar to the EULEX code of Deuflhard1983 and Hairer1992.
+    This version allows for the specification of a mass matrix for solving implicit ODEs
+    """
 
     def __init__(
         self,
@@ -490,11 +502,14 @@ class EulerExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        total_feval_cost_for_k = np.cumsum(self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost), dtype=self.dtype)
+        total_feval_cost_for_k = np.cumsum(
+            self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost),
+            dtype=self.dtype,
+        )
         self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
-    
+
     @override
     def base_scheme(
         self,
@@ -523,8 +538,10 @@ class EulerExtrapolationMass(ExtrapolationSolver):
 
 
 class ModMidpointExtrapolation(ExtrapolationSolver):
-    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by afactor of 2 in each extapolation step.
-    With default config similar to the ODEX code of Hairer&Wanner"""
+    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by a factor of 2 in each extrapolation step.
+    For this, the "harmonic", "Romberg" and "Bulirsch" substep sequences are made even by doubling each entry.
+    With default config similar to the ODEX code of Hairer1992 or DIFEX1 of Deuflhard1983. Also similar to the Bulirsch-Stoer method but without rational extrapolation.
+    """
 
     def __init__(
         self,
@@ -534,8 +551,8 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         use_smoothing: bool = False,
         substep_seq: (
             NDArray[np.integer]
-            | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "harmonic2", "fours", "SODEX"]
-        ) = "harmonic_even",
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
         dtype: DTypeLike = np.double,
     ):
         self.use_smoothing = use_smoothing
@@ -547,14 +564,13 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
-        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * 1.0, dtype=self.dtype)
+        total_feval_cost_for_k = np.cumsum(
+            (self.substep_seq + self.use_smoothing) * 1.0, dtype=self.dtype
+        )
         self._init_controller(total_feval_cost_for_k)
 
     @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
+    def _fevals_per_base_solve(self, n_substeps: int) -> int:
         return n_substeps + self.use_smoothing
 
     @override
@@ -584,8 +600,11 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
 
 
 class ModMidpointExtrapolationMass(ExtrapolationSolver):
-    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by afactor of 2 in each extapolation step.
-    With default config similar to the ODEX code of Hairer&Wanner"""
+    """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by a factor of 2 in each extrapolation step.
+    For this, the "harmonic", "Romberg" and "Bulirsch" substep sequences are made even by doubling each entry.
+    With default config a Bulirsch-Stoer method similar to the ODEX code of Hairer1992 or DIFEX1 of Deuflhard1983. Also similar to the Bulirsch-Stoer method but without rational extrapolation.
+    This version allows for the specification of a mass matrix for solving implicit ODEs
+    """
 
     def __init__(
         self,
@@ -596,8 +615,8 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         use_smoothing: bool = False,
         substep_seq: (
             NDArray[np.integer]
-            | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "harmonic2", "fours", "SODEX"]
-        ) = "harmonic_even",
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
         implicit_rel_costs: ImplicitRelCosts | None = None,
         dtype: DTypeLike = np.double,
     ):
@@ -616,16 +635,17 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
             mass_matrix=mass_matrix,
             implicit_rel_costs=implicit_rel_costs,
         )
-        total_feval_cost_for_k = np.cumsum((self.substep_seq + self.use_smoothing) * (1.0 + self.implicit_rel_costs.rel_backsub_cost), dtype=self.dtype)
+        total_feval_cost_for_k = np.cumsum(
+            (self.substep_seq + self.use_smoothing)
+            * (1.0 + self.implicit_rel_costs.rel_backsub_cost),
+            dtype=self.dtype,
+        )
         self._init_controller(total_feval_cost_for_k)
 
         self.lu_and_piv_mass = lu_factor(mass_matrix)
 
     @override
-    def _fevals_per_base_solve(
-        self,
-        n_substeps: int
-    ) -> int:
+    def _fevals_per_base_solve(self, n_substeps: int) -> int:
         return n_substeps + self.use_smoothing
 
     @override
@@ -674,7 +694,9 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
 
 
 class LimplicitEulerExtrapolation(ExtrapolationSolver):
-    """Extrapolation with the linearly-implicit Euler method as the underlying scheme and therefore usable for stiff problems. With default config similar to the SEULEX code of Hairer&Wanner"""
+    """Extrapolation with the linearly-implicit Euler method as the underlying scheme and therefore usable for stiff problems.
+    With default config similar to the SEULEX code of Hairer1992.
+    """
 
     def __init__(
         self,
@@ -717,11 +739,19 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             implicit_rel_costs=implicit_rel_costs,
         )
 
-        feval_cost_per_k = (self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
+        feval_cost_per_k = (
+            self.substep_seq * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
             + self.implicit_rel_costs.rel_lu_cost
-            + (self.implicit_rel_costs.rel_backsub_cost + self.implicit_rel_costs.norm_cost) * (self.substep_seq >= 2)  # cost of stability check (lu_backsub + norm)
+            + (
+                self.implicit_rel_costs.rel_backsub_cost
+                + self.implicit_rel_costs.norm_cost
+            )
+            * (self.substep_seq >= 2)  # cost of stability check (lu_backsub + norm)
         )
-        total_feval_cost_for_k = np.cumsum(feval_cost_per_k, dtype=self.dtype) + self.implicit_rel_costs.rel_jac_cost
+        total_feval_cost_for_k = (
+            np.cumsum(feval_cost_per_k, dtype=self.dtype)
+            + self.implicit_rel_costs.rel_jac_cost
+        )
         self._init_controller(total_feval_cost_for_k)
 
     @override
@@ -735,7 +765,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
     ) -> tuple[NDArray[np.floating], bool]:
         r"""calculates the specified number of steps with the linearly-implicit euler scheme (Rosenbrock-like) (I - \Delta t J) x^{n+1} = \Delta t f(x^n) with a constant jacobian evaluated at x0"""
         assert jac0 is not None
-        
+
         delta_t = (t_max - t0) / n_steps
         lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
 
@@ -772,18 +802,25 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
 
 
 class LimplicitMidpointExtrapolation(ExtrapolationSolver):
-    """Extrapolation method using the linearly-implicit midpoint scheme as its base method. Applicable to stiff problems and corresponds to the SODEX scheme of Hairer&Wanner"""
+    """Extrapolation method using the linearly-implicit midpoint scheme as its base method.
+    Applicable to stiff problems and corresponds to the SODEX scheme of Hairer1992 orMETAn1 of Deuflhard1983.
+
+    The "harmonic", "Romberg" and "Bulirsch" substep sequences are made even by doubling each entry.
+    """
 
     def __init__(
         self,
         ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
-        table_size: int = 10,
+        table_size: int = 7,
         jac_fun: (
             Callable[[float, NDArray[np.floating]], NDArray[np.floating]] | None
         ) = None,
         step_controller: StepControllerExtrap | None = None,
         use_smoothing: bool = False,
-        substep_seq: NDArray[np.integer] | Literal["harmonic_even", "Romberg_even", "Bulirsch_even", "fours", "SODEX"] = "SODEX",
+        substep_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "fours", "SODEX"]
+        ) = "SODEX",
         mass_matrix: NDArray[np.floating] | None = None,
         num_odes: int | None = None,
         implicit_rel_costs: ImplicitRelCosts | None = None,
@@ -813,15 +850,18 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             implicit_rel_costs=implicit_rel_costs,
         )
 
-        feval_cost_per_k =(
+        feval_cost_per_k = (
             (self.substep_seq + self.use_smoothing)
             * (1.0 + self.implicit_rel_costs.rel_backsub_cost)
             + self.implicit_rel_costs.rel_lu_cost
-            + self.implicit_rel_costs.norm_cost * (self.substep_seq >= 2) # cost of stability check (norm)
-        )  
-        total_feval_cost_for_k = np.cumsum(feval_cost_per_k, dtype=self.dtype) +  self.implicit_rel_costs.rel_jac_cost
+            + self.implicit_rel_costs.norm_cost
+            * (self.substep_seq >= 2)  # cost of stability check (norm)
+        )
+        total_feval_cost_for_k = (
+            np.cumsum(feval_cost_per_k, dtype=self.dtype)
+            + self.implicit_rel_costs.rel_jac_cost
+        )
         self._init_controller(total_feval_cost_for_k)
-    
 
     @override
     def base_scheme(
@@ -830,7 +870,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         t0: float,
         t_max: float,
         n_steps: int,
-        jac0: NDArray[np.floating] | None
+        jac0: NDArray[np.floating] | None,
     ) -> tuple[NDArray[np.floating], bool]:
         """linearly implicit midpoint scheme with optional Gragg-smoothing"""
         assert jac0 is not None

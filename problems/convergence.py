@@ -1,4 +1,3 @@
-from readline import backend
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -32,16 +31,9 @@ x_analytic: Callable[[float], NDArray[np.floating]] = lambda t: 2*np.exp(2*t + n
 
 norm = norm_hairer
 
-N_list = np.array([3*2 ** (k // 2) if k == 1 or k % 2 == 0 else 3*1.5 * 2 ** (k // 2)for k in range(2, 8)])
+N_list = 4*np.array([2 ** (k // 2) if k == 1 or k % 2 == 0 else 1.5 * 2 ** (k // 2) for k in range(1,8)])
 k_list = np.array(range(5))
 conv_data = dict()
-
-
-errors: list[float] = list()
-for n_steps in N_list:
-  time, result, solve_info = AB_k(x_dot, x0, t_max, h=t_max/n_steps, k=5)
-  errors.append(norm(result[-1] - x_analytic(time[-1])))
-conv_data['AB_5'] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
@@ -62,10 +54,8 @@ for n_steps in N_list:
     table_size=8,
     step_controller=StepControllerExtrapDummy(),
   )
-  time, result, solve_info = solver_eulex2.solve(x0, t_max, k_initial=2, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_eulex2.solve(x0, t_max, k_initial=1, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
-  plt.plot(time, result)
-  plt.show()
 conv_data['EULEX2'] = np.array(errors)
 
 errors = list()
@@ -75,7 +65,7 @@ for n_steps in N_list:
     table_size=8,
     step_controller=StepControllerExtrapDummy(),
   )
-  time, result, solve_info = solver_eulex3.solve(x0, t_max, k_initial=3, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_eulex3.solve(x0, t_max, k_initial=2, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
 conv_data['EULEX3'] = np.array(errors)
 
@@ -86,7 +76,7 @@ for n_steps in N_list:
     table_size=8,
     step_controller=StepControllerExtrapDummy(),
   )
-  time, result, solve_info = solver_eulex5.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_eulex5.solve(x0, t_max, k_initial=4, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
 conv_data['EULEX5'] = np.array(errors)
 
@@ -97,32 +87,32 @@ for n_steps in N_list:
     table_size=8,
     step_controller=StepControllerExtrapDummy(),
   )
-  time, result, solve_info = solver_eulex7.solve(x0, t_max, k_initial=7, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_eulex7.solve(x0, t_max, k_initial=6, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
 conv_data['EULEX7'] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
-  solver_eulex7q = EulerExtrapolation(
+  solver_eulex7ld = EulerExtrapolation(
     ode_fun=x_dot,
     table_size=8,
     step_controller=StepControllerExtrapDummy(),
     dtype=np.longdouble
   )
-  time, result, solve_info = solver_eulex7q.solve(x0, t_max, k_initial=7, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_eulex7ld.solve(x0.astype(np.longdouble), t_max, k_initial=7, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
-conv_data['EULEX7quad'] = np.array(errors)
+conv_data['EULEX7longdouble'] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
   solver_odex5 = ModMidpointExtrapolation(
     ode_fun=x_dot,
     table_size=8,
-    step_controller=StepControllerExtrapDummy(),
+    step_controller=StepControllerExtrapDummy()
   )
-  time, result, solve_info = solver_odex5.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_odex5.solve(x0, t_max, k_initial=3, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
-conv_data['ODEX5'] = np.array(errors)
+conv_data['ODEX3'] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
@@ -132,9 +122,9 @@ for n_steps in N_list:
     step_controller=StepControllerExtrapDummy(),
     use_smoothing=True
   )
-  time, result, solve_info = solver_odex5s.solve(x0, t_max, k_initial=5, h_initial=t_max/n_steps)
+  time, result, solve_info = solver_odex5s.solve(x0, t_max, k_initial=3, h_initial=t_max/n_steps)
   errors.append(norm(result[-1]-x_analytic(time[-1])))
-conv_data['ODEX5smoothed'] = np.array(errors)
+conv_data['ODEX3smoothed'] = np.array(errors)
 
 # results
 fig, ax = plt.subplots()
@@ -145,7 +135,7 @@ ax.set_xlabel("h")
 ax.set_ylabel("error")
 
 for i, (scheme_name, errors) in enumerate(conv_data.items()):
-    ax.plot(t_max/N_list, errors, label=scheme_name, color=cmap(i))
+    ax.plot(t_max/N_list, errors, label=scheme_name, color=cmap(i), marker='o')
     rate = np.log(errors[1:]/errors[:-1])/np.log(N_list[:-1]/N_list[1:])
     ax.text(t_max/N_list[-1], errors[-1], f"$p = {rate[-1]:.2f}$")
 
