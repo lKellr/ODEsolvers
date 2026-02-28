@@ -537,6 +537,80 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         return x_n, False
 
 
+class EulerExtrapolationRational(EulerExtrapolation):
+    """Extrapolation with Euler's method as the underlying scheme. This modification uses rational instead of polynomial extrapolation"""
+
+    def __init__(
+        self,
+        ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+        table_size: int = 10,
+        step_controller: StepControllerExtrap | None = None,
+        substep_seq: (
+            NDArray[np.integer]
+            | Literal["harmonic", "Romberg", "Bulirsch", "harmonic2", "fours", "SODEX"]
+        ) = "harmonic",
+        dtype: DTypeLike = np.double,
+    ):
+        super().__init__(
+            ode_fun=ode_fun,
+            table_size=table_size,
+            step_controller=step_controller,
+            substep_seq=substep_seq,
+            dtype=dtype,
+        )
+        self.coeffs_extrap = np.array(
+            [
+                [
+                    (
+                        (
+                            (self.substep_seq[k] / self.substep_seq[k - j])
+                            ** (1 + self.is_symmetric)
+                            - 1.0
+                        )
+                        if j <= k
+                        else None  # will be cast to NaN
+                    )
+                    for j in range(1, table_size)
+                ]
+                for k in range(1, table_size)
+            ],
+            dtype,
+        )
+
+    @override
+    def fill_extrapolation_table(
+        self,
+        T_fine_first_order: NDArray[np.floating],
+        T_table_k: NDArray[np.floating],
+        k: int,
+    ) -> None:
+        """Increases the accuracy of the estimate for x0 by one order in the stepsize with the help of Richardson extrapolation.
+        For this, the number of steps has to be increased over the previous order. Approximations of all orders lower than the target order are computed with this number of steps.
+        The function fills a table of the computed approximations to reuse in the next order-increasing step.
+
+        This variant uses rational instead of polynomial extraplation
+        """
+        T_extrap = T_fine_first_order
+        T_coarselow = 0.0
+
+        # perform repeated Richardson extrapolation until the target order has been reached,
+        # T_table_k starts with lower resolution approximations from a previous extrapolation
+        # step and is progressively filled with extrapolated values (and the low order solver result)
+        for j in range(0, k):
+            # extraction from array for readability:
+            T_coarselowlow = T_coarselow
+            T_coarselow = T_table_k[j]
+            T_finelow = T_extrap
+
+            T_extrap = T_finelow + (T_finelow - T_coarselow) / (
+                self.coeffs_extrap[k - 1, j]
+                * (1.0 - (T_finelow - T_coarselow) / (T_finelow - T_coarselowlow))
+                - 1.0
+            )
+            T_table_k[j] = T_finelow
+        T_table_k[k] = T_extrap
+
+
 class ModMidpointExtrapolation(ExtrapolationSolver):
     """This extrapolation method is based around the modified midpoint method. As it is symmetric, the order increases by a factor of 2 in each extrapolation step.
     For this, the "harmonic", "Romberg" and "Bulirsch" substep sequences are made even by doubling each entry.
