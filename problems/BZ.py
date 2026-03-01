@@ -1,7 +1,13 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from solvers.implicit import *
+from solvers.embedded import DP45
+from solvers.Extrapolation_Scheme import LimplicitEulerExtrapolation
 import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger_mpb = logging.getLogger("matplotlib")
+logger_mpb.setLevel(logging.INFO)
 
 # Zhabotinsky-Belousov reaction / Oregonator
 # Due to Field and Noyes 1974,
@@ -21,7 +27,10 @@ x_dot: Callable[[float, NDArray[floating]], NDArray[floating]] = lambda t, x: np
 t_max = 350.0
 x0 = np.array([488.68, 0.99796, 488.68])
 
-time, result, solve_info = BDF3(x_dot, x0, t_max, h=1e-1)
+# time, result, solve_info = BDF3(x_dot, x0, t_max, h=1e-1)
+# time, result, solve_info = DP45(x_dot, x0, t_max)
+solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=16)
+time, result, solve_info = solver_seulex.solve(x0, t_max)
 
 fig, ax = plt.subplots(nrows=3, sharex=True)
 
