@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 from numpy._typing._array_like import NDArray
-from numpy._typing._array_like import NDArray
-from numpy._typing._array_like import NDArray
 from typing import (
     Any,
     Callable,
@@ -176,7 +174,6 @@ class ExtrapolationSolver(ABC):
             assert jac_fun is not None
             self.jac_fun = jac_fun
 
-        self.mass_matrix
         if mass_matrix is None:
             self.mass_matrix = np.identity(num_odes, dtype=self.dtype)
         else:
@@ -195,7 +192,7 @@ class ExtrapolationSolver(ABC):
                 for k in range(1, self.table_size)
             ],
             dtype=self.dtype,
-        )
+        )  # NOTE: first entry is never used
 
         self.step_controller.initialize_scheme(
             self.table_size, err_reduction_at_step, total_feval_cost_for_k
@@ -305,7 +302,6 @@ class ExtrapolationSolver(ABC):
                 state = "divergence"
 
         step_info["stop_reason"] = state
-        logger.debug(step_info["stop_reason"])
         step_info["n_feval"] = self.n_fevals[iterator_table]
         step_info["n_lu"] = self.require_jacobian * (
             iterator_table + 1
@@ -336,10 +332,11 @@ class ExtrapolationSolver(ABC):
             n_jaceval=0,
             n_lu=0,  # initial one for implicit ODEs is not counted
             n_restarts=0,
+            local_errors=[],
         )
 
         k_target: int
-        step: float
+        next_step: float
 
         if k_initial is None:
             k_target = self.step_controller.get_initial_ktarget()
@@ -347,13 +344,13 @@ class ExtrapolationSolver(ABC):
             k_target = k_initial
 
         if h_initial is None:
-            step = self.step_controller.get_initial_stepHW(
-                self.ode_fun, x0, t0=t0, p=k_target
+            next_step = self.step_controller.get_initial_stepHW(
+                self.ode_fun, x0, t0=t0, p=k_target + 1
             )
         else:
-            step = h_initial
+            next_step = h_initial
 
-        logger.debug(f"Beginning solve with h = {step}, k = {k_target}")
+        logger.debug(f"Beginning solve.")
 
         time = [t0]
         solution = [x0.astype(self.dtype)]
@@ -362,22 +359,26 @@ class ExtrapolationSolver(ABC):
         current_time = t0
         while current_time < t_max:
             if (
-                current_time + step > t_max
+                current_time + next_step > t_max
             ):  # shorten h if we would go further than necessary
                 step = t_max - current_time
                 allow_full_order_variation = True
+            else:
+                step = next_step
 
             logger.debug(
-                f"Starting step at time {current_time} of {t_max} with k_target = {k_target}, h = {step:.2E}"
+                f"Starting step at time {current_time:.3f} of {t_max} with k_target = {k_target}, h = {step:.2E}"
             )
 
             # do step
-            new_solution, k_target, step, accepted, step_info = self.extrapolation_step(
-                current_time,
-                solution[-1],
-                k_target if not allow_full_order_variation else self.table_size - 1,
-                step,
-                allow_full_order_variation,
+            new_solution, k_target, next_step, accepted, step_info = (
+                self.extrapolation_step(
+                    current_time,
+                    solution[-1],
+                    k_target if not allow_full_order_variation else self.table_size - 1,
+                    step,
+                    allow_full_order_variation,
+                )
             )
             if allow_full_order_variation:
                 allow_full_order_variation = False
@@ -396,6 +397,11 @@ class ExtrapolationSolver(ABC):
                 current_time += step
                 solution.append(new_solution)
                 time.append(current_time)
+
+                solve_info["local_errors"].append(
+                    self.step_controller.norm(step_info["local_error"])
+                )
+
             else:
                 logger.debug(f"Retrying step with h = {step:.2E}")
                 solve_info["n_restarts"] += 1

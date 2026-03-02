@@ -471,20 +471,22 @@ class StepControllerExtrapH(StepControllerExtrap):
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
-        next_k = k_target  # first check at next_k-1
         state: contr_ext_state_type = "continue"
+        next_k = self.table_size  # first check at next_k-1
+        next_step_mult = -1.0
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
-        if err_ratio <= 1.0:
-            next_step_mult = self._get_step_mult_opt(err_ratio, self.table_size - 1)
-            if self.is_retry:
-                next_step_mult = min(1.0, next_step_mult)
-                self.is_retry = False
-            state = "accepted"
-        else:
-            next_step_mult = self._get_step_mult_opt(err_ratio, self.table_size - 1)
-            self.is_retry = True
-            state = "too_slow_convergence"
+        if table_col_ix >= self.table_size - 1:
+            if err_ratio <= 1.0:
+                next_step_mult = self._get_step_mult_opt(err_ratio, next_k)
+                if self.is_retry:
+                    next_step_mult = min(1.0, next_step_mult)
+                    self.is_retry = False
+                state = "accepted"
+            else:
+                next_step_mult = self._get_step_mult_opt(err_ratio, next_k)
+                self.is_retry = True
+                state = "too_slow_convergence"
 
         return next_k, next_step_mult, state
 
@@ -523,17 +525,16 @@ class StepControllerExtrapK(StepControllerExtrap):
         x_curr: NDArray[np.floating],
         x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
-        next_step_mult = 1.0  # we do not want to change the step size
-        next_k = 1  # this trips convergence checks in each tableau column
         state: contr_ext_state_type = "continue"
+        next_k = 1  # this trips convergence checks in each tableau column
+        next_step_mult = 1.0  # we do not want to change the step size
         err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
         if err_ratio <= 1.0:
             self.is_retry = False
             state = "accepted"
         elif (
-            err_ratio
-            > np.prod(self.err_reduction_at_step[table_col_ix - 1:])
+            err_ratio > np.prod(self.err_reduction_at_step[table_col_ix:])
             or table_col_ix == self.table_size - 1
         ):  # b) Convergence monitor: can we expect convergence in later steps?
             self.is_retry = True
