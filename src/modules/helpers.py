@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root
 
-norm_hairer: Callable[[NDArray[np.floating]], float] = (
+norm_hairer: Callable[[NDArray[np.floating]], np.floating] = (
     lambda x: (np.sum(x**2) / x.size) ** 0.5
 )
 

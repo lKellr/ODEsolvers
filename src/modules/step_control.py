@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Literal, NamedTuple, override
+from typing import Callable, Literal, NamedTuple, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from modules.helpers import norm_hairer, clip
@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-contr_ext_state_type = Literal["accepted", "continue", "too_slow_convergence"]
+contr_ext_state_type = Literal["accepted", "continue", "too_slow_convergence", "divergence"]
 
 
 class ControllerPIParams(NamedTuple):
@@ -214,8 +214,10 @@ class StepControllerPI(StepController):
 
 
 class StepControllerExtrap(StepController, ABC):
+
     def __init__(
         self,
+        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -227,6 +229,7 @@ class StepControllerExtrap(StepController, ABC):
     ) -> None:
         super().__init__(atol, rtol, norm, safety_tol)
 
+        self.is_symmetric = is_symmetric
         self.safety_unscaled = safety_unscaled
         self.s_limits_scaled = s_limits_scaled
         self.step_multiplier_divergence = step_multiplier_divergence
@@ -238,38 +241,61 @@ class StepControllerExtrap(StepController, ABC):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
+        check_window: tuple[int, int],
     ):
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
         self.total_feval_cost_for_k = total_feval_cost_for_k
+        self.check_window = check_window
 
     def get_initial_ktarget(self) -> int:
         """very rough estimate from numerical recipes, can be motivated for example from Hairer&Wanner Fig.9.5"""
-        log_fact = -max(-12.0, np.log10(self.rtol)) * 0.6 + 0.5
+        if self.is_symmetric:
+            log_fact = -max(-12.0, np.log10(self.rtol)) * 0.6 + 0.5
+        else:
+            log_fact = -np.log10(self.rtol + self.atol) * 0.6 + 0.5
         k_target = max(1, min(self.table_size - 1, int(log_fact)))
         return k_target
 
+    def get_error(
+        self,
+        k_curr: int,
+        k_target: int,
+        T_table_k: NDArray[np.floating],
+        x_curr: NDArray[np.floating],
+        last_table_diag: NDArray[np.floating],
+    ) -> float:
+        error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
+
+        error_ratio = self._get_error_ratio(error, x_curr, T_table_k[k_curr])
+        return error_ratio
+
     def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
         """returns the optimal factor by which the step should be multiplied to reach the prescribed tolerance levels"""
-        s_opt = self.safety_unscaled * (self.safety_tol / err_ratio_k) ** (
-            1 / (2 * next_k + 1)
-        )
-        temp_s_limit_descaled = self.s_limits_scaled[0] ** (1 / (2 * next_k + 1))
-        s_opt = clip(
-            s_opt,
-            temp_s_limit_descaled / self.s_limits_scaled[1],
-            1 / temp_s_limit_descaled,
-        )
+        order_exponent = (
+            1 / (2 * next_k + 1) if self.is_symmetric else next_k + 1  #
+        )  # NOTE: 2*k+1 since k starts at zero. Hairer&Wanner use 2*k-1 for k starting with 1
+        temp_s_limit_descaled = self.s_limits_scaled[0] ** order_exponent
+
+        if err_ratio_k == 0:
+            s_opt = 1 / temp_s_limit_descaled
+        else:
+            s_opt = (
+                self.safety_unscaled * (self.safety_tol / err_ratio_k) ** order_exponent
+            )
+            s_opt = clip(
+                s_opt,
+                temp_s_limit_descaled / self.s_limits_scaled[1],
+                1 / temp_s_limit_descaled,
+            )
         return s_opt
 
     @abstractmethod
     def evaluate_step(
         self,
-        table_col_ix: int,
+        error_ratio: float,
+        k_curr: int,
         k_target: int,
-        error: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
         raise NotImplementedError()
 
@@ -279,6 +305,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
     def __init__(
         self,
+        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -290,6 +317,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         work_order_limits: tuple[float, float] = (0.8, 0.9),
     ) -> None:
         super().__init__(
+            is_symmetric,
             atol,
             rtol,
             norm,
@@ -299,6 +327,10 @@ class StepControllerExtrapKH(StepControllerExtrap):
             step_multiplier_divergence,
             dtype,
         )
+
+        assert (
+            1.0 / work_order_limits[1] > work_order_limits[0]
+        ), f"Invalid work order limits {work_order_limits}!"
         self.work_order_limits = work_order_limits
 
     def initialize_scheme(
@@ -306,135 +338,146 @@ class StepControllerExtrapKH(StepControllerExtrap):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
+        check_window: tuple[int, int] = (1, 1)
     ):
         super().initialize_scheme(
-            table_size, err_reduction_at_step, total_feval_cost_for_k
+            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
         )
-        self.err_ratios_k = np.empty((table_size-1,), self.dtype)
+        self.k_min = 1
+        self.k_max: int = table_size - 1 # NOTE: Hairer & Wanner use table_size - 2
 
-    def _get_most_efficient_params(
-        self, err_ratios_k: NDArray[np.floating], k_check: int
-    ) -> tuple[int, float]:
-        s_same = self._get_step_mult_opt(err_ratios_k[k_check - 1], k_check)
-        !s_decreased = self._get_step_mult_opt(err_ratios_k[k_check - 2], k_check - 1) # TODO: this can not be calculated for k_check=1
+        chk_wd_size = check_window[0] + check_window[1] + 1
+        self.opt_step_mult_k = np.empty((chk_wd_size + 1,), self.dtype)
+
+    @override
+    def get_error(
+        self,
+        k_curr: int,
+        k_target: int,
+        T_table_k: NDArray[np.floating],
+        x_curr: NDArray[np.floating],
+        last_table_diag: NDArray[np.floating],
+    ) -> float:
+        error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
+
+        # TODO: just temporary
+        error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
+        error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
+        print(f"errors: {error}, {error_d}, {error_de}")
+
+        error_ratio = self._get_error_ratio(error, x_curr, T_table_k[k_curr])
+        if (
+            k_curr >= k_target - self.check_window[0] - 1
+        ):  # TODO: first entry only required if we have convergence in the first window column (i could calcualte the corresponding error from the tableau?)
+            self.opt_step_mult_k[k_curr - k_target + self.check_window[0] + 1] = self._get_step_mult_opt(
+                error_ratio, k_curr
+            )  # cache this as error computation is expensive
+        return error_ratio
+
+    def _get_most_efficient_params(self, k_check: int, k_window_pos: int) -> tuple[int, float]:
+        assert k_check >= self.k_min and k_check <= self.k_max, "Values outside the allowed range should not be checked"
+
+        # TODO: only works inside of a narrow window
+        # TODO: clamp to h_max before work computation
+        s_decreased = self.opt_step_mult_k[k_window_pos-1] # NOTE: might not be initialized
+        s_same = self.opt_step_mult_k[k_window_pos]
+        s_increased = 
+            s_same
+            * self.total_feval_cost_for_k[k_check + 1]
+            / self.total_feval_cost_for_k[k_check]
+
+
+        work_decreased = self.total_feval_cost_for_k[k_check - 1] / s_decreased
         work_same = (
             self.total_feval_cost_for_k[k_check] / s_same
-        )  # NOTE: since the same step length is used with the multiplier, we can calcualte the relative work just from the multipliers
-        work_decreased = self.total_feval_cost_for_k[k_check - 1] / s_decreased
+        )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
 
-        next_k: int
+        next_ktarget: int
         next_s: float
         if (
-            work_decreased < self.work_order_limits[0] * work_same and !k_check > 2 # TODO: last check required?
+            work_decreased < self.work_order_limits[0] * work_same and k_check - 1 >= self.k_min
         ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
-            next_k = k_check - 1  # order decrease
-            next_s = s_decreased
+            next_ktarget = k_check - 1  # order decrease/double decrease
         elif (
             work_same < self.work_order_limits[1] * work_decreased
-            and k_check + 1 < self.table_size # TODO: i think k_check is the maximum!
-        ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. This is probably still accurate since we are close to the optimal value, wheere the work costs are alsomst equal?
-            next_k = k_check + 1  # order increase
-            next_s = (
-                s_same
-                * self.total_feval_cost_for_k[k_check + 1]
-                / self.total_feval_cost_for_k[k_check]
-            )
+            and k_check + 1 <= self.k_max
+        ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. This is still accurate since we are close to the optimal value, where the work costs are almost equal?
+            next_ktarget = k_check + 1  # order increase / constant
         else:
-            next_k = k_check
-            next_s = s_same
-        return next_k, next_s
+            next_ktarget = k_check  # order constant / decrease
+        
+        return next_ktarget, next_s
+
+    @override
+    def get_next_parameters(
+        self,
+        k_curr: int,
+        k_target: int,
+    ) -> tuple[int, float]:
+        next_ktarget = -1
+        next_step_mult = -1.0
+
+        if k_curr < k_target + self.check_window[1]:
+            next_ktarget, next_step_mult = self._get_most_efficient_params(k_curr, k_curr - k_target + self.check_window[0] + 1, self.is_retry)
+        else:
+            s_decreased = self.opt_step_mult_k[-3]  # NOTE: might not be initialized
+            s_target = self.opt_step_mult_k[-2]
+            s_last = self.opt_step_mult_k[-1]
+
+            work_decreased = self.total_feval_cost_for_k[k_target - 1] / s_decreased
+            work_target = self.total_feval_cost_for_k[k_target] / s_target
+            work_last = self.total_feval_cost_for_k[k_target + 1] / s_last
+
+            next_ktarget = k_target
+            next_step_mult = s_target
+            work_temp_faster = work_target
+            if (
+                work_decreased < self.work_order_limits[0] * work_target
+                and k_target - 1 >= self.k_min
+            ):
+                next_ktarget = k_target - 1
+                next_step_mult = s_decreased
+                work_temp_faster = work_decreased
+
+            if (
+                work_last < self.work_order_limits[1] * work_temp_faster
+                and k_target + 1 <= self.k_max
+            ):
+                next_ktarget = k_target + 1
+                next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
+        if self.is_retry:
+            next_ktarget = min(k_target, next_ktarget)
+            # next_ktarget = min(k_curr, next_ktarget) # TODO: which version?
+            next_step_mult = min(1, next_step_mult)
+        return next_ktarget, next_step_mult
+
 
     @override
     def evaluate_step(
         self,
-        table_col_ix: int,
+        error_ratio: float,
+        k_curr: int,
         k_target: int,
-        error: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        x_table: NDArray[np.floating],
-    ) -> tuple[int, float, contr_ext_state_type]:
+    ) -> contr_ext_state_type:
+        
         state: contr_ext_state_type = "continue"
-        next_k = -1
-        next_step_mult = -1.0
 
-        err_ratio = self._get_error_ratio(error, x_curr, x_table)
-        self.err_ratios_k[table_col_ix-1] = (
-            err_ratio  # cache this as error computation is expensive
-        )
-
-        if table_col_ix <= k_target:
-            if err_ratio <= 1.0:  # a) Convergence in line k_target − 1
-                next_k, next_step_mult = self._get_most_efficient_params(
-                    self.err_ratios_k, table_col_ix
-                )
-                if self.is_retry:
-                    next_k = min(k_target, next_k)
-                    next_step_mult = min(1.0, next_step_mult)
-                    self.is_retry = False
-
-                state = "accepted"
-            elif err_ratio > np.prod(self.err_reduction_at_step[table_col_ix-1:k_target] # TODO: check this product
-            ):  # b) Convergence monitor: can we expect convergence in later steps?
-                k_opt, step_mult = self._get_most_efficient_params(
-                    self.err_ratios_k, table_col_ix
-                )
-                next_k = min(k_target, k_opt)
-                next_step_mult = min(1.0, step_mult)
-                self.is_retry = True
-                state = "too_slow_convergence"
-                # otherwise continue with the next table row
-                # else:
-                #   state = "continue"
-        else:  # table_col_ix == iterator_target+1
+        if(k_curr >= 2 and error_ratio >= err_ratio_prev):  # Hairer & Wanner divergence monitor a)
+            state = "divergence"
+        # TODO: this check removes possibility for full order variation!
+        elif k_curr <= k_target + self.check_window[1]:
             if (
-                err_ratio <= 1.0
-            ):  # in this case, _get_most_efficient_params can not be used
-
-                s_decreased = self._get_step_mult_opt(
-                    self.err_ratios_k[k_target - 1], k_target - 1
-                )
-                s_target = self._get_step_mult_opt(
-                    self.err_ratios_k[k_target], k_target
-                )
-                s_last = self._get_step_mult_opt(
-                    self.err_ratios_k[k_target + 1], k_target + 1
-                )
-                work_decreased = self.total_feval_cost_for_k[k_target - 1] / s_decreased
-                work_target = self.total_feval_cost_for_k[k_target] / s_target
-                work_last = self.total_feval_cost_for_k[k_target + 1] / s_last
-
-                next_k = k_target
-                next_step_mult = s_target
-                work_temp_faster = work_target
-                if (
-                    work_decreased < self.work_order_limits[0] * work_target
-                    and k_target > 2
-                ):
-                    next_k = k_target - 1
-                    next_step_mult = s_decreased
-                    work_temp_faster = work_decreased
-
-                if (
-                    work_last < self.work_order_limits[1] * work_temp_faster
-                    and k_target + 1 < self.table_size
-                ):
-                    next_k = k_target + 1
-                    next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
-
-                if self.is_retry:
-                    next_k = min(k_target, next_k)
-                    next_step_mult = min(1.0, next_step_mult)
-                    self.is_retry = False
+                error_ratio <= 1.0
+            ):  # a) Convergence in line k_target − 1; or  k_target
                 state = "accepted"
-            else:  # convergence not reached even at higher order, retry
-                k_opt, step_mult = self._get_most_efficient_params(
-                    self.err_ratios_k, k_target
-                )
-                next_k = min(k_target, k_opt)
-                next_step_mult = min(1.0, step_mult)
-                self.is_retry = True
+            elif error_ratio > np.prod(
+                self.err_reduction_at_step[
+                    k_curr : k_target + self.check_window[1]
+                ]  # TODO: check this product
+            ):  # b) Convergence monitor: can we expect convergence in later steps?
+                self.is_retry = True # TODO: required?
                 state = "too_slow_convergence"
-        return next_k, next_step_mult, state
+        return state
 
 
 class StepControllerExtrapH(StepControllerExtrap):
@@ -442,6 +485,7 @@ class StepControllerExtrapH(StepControllerExtrap):
 
     def __init__(
         self,
+        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -452,6 +496,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+            is_symmetric,
             atol,
             rtol,
             norm,
@@ -462,33 +507,41 @@ class StepControllerExtrapH(StepControllerExtrap):
             dtype,
         )
 
+    def initialize_scheme(
+        self,
+        table_size: int,
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
+        check_window: tuple[int, int] = None
+    ):
+        super().initialize_scheme(
+            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window=(0, 0)
+        )
+
     @override
     def evaluate_step(
         self,
-        table_col_ix: int,
+        error_ratio: float,
+        k_curr: int,
         k_target: int,
-        error: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
         state: contr_ext_state_type = "continue"
-        next_k = self.table_size  # first check at next_k-1
+        next_ktarget = k_curr  # first check at next_k
         next_step_mult = -1.0
-        err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
-        if table_col_ix >= self.table_size - 1:
-            if err_ratio <= 1.0:
-                next_step_mult = self._get_step_mult_opt(err_ratio, next_k)
+        if k_curr >= self.table_size - 1:
+            if error_ratio <= 1.0:
+                next_step_mult = self._get_step_mult_opt(error_ratio, next_k)
                 if self.is_retry:
                     next_step_mult = min(1.0, next_step_mult)
                     self.is_retry = False
                 state = "accepted"
             else:
-                next_step_mult = self._get_step_mult_opt(err_ratio, next_k)
+                next_step_mult = self._get_step_mult_opt(error_ratio, next_k)
                 self.is_retry = True
                 state = "too_slow_convergence"
 
-        return next_k, next_step_mult, state
+        return next_ktarget, next_step_mult, state
 
 
 class StepControllerExtrapK(StepControllerExtrap):
@@ -506,6 +559,7 @@ class StepControllerExtrapK(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+            False,  # not needed
             atol,
             rtol,
             norm,
@@ -516,26 +570,33 @@ class StepControllerExtrapK(StepControllerExtrap):
             dtype,
         )
 
+    def initialize_scheme(
+        self,
+        table_size: int,
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
+        check_window: tuple[int, int] = None
+    ):
+        super().initialize_scheme(
+            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window=(self.table_size-1, self.table_size-1)
+        )
+
     @override
     def evaluate_step(
         self,
-        table_col_ix: int,
+        error_ratio: float,
+        k_curr: int,
         k_target: int,
-        error: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
         state: contr_ext_state_type = "continue"
-        next_k = 1  # this trips convergence checks in each tableau column
+        next_ktarget = k_target
         next_step_mult = 1.0  # we do not want to change the step size
-        err_ratio = self._get_error_ratio(error, x_curr, x_table)
 
-        if err_ratio <= 1.0:
+        if error_ratio <= 1.0:
             self.is_retry = False
             state = "accepted"
-        elif (
-            err_ratio > np.prod(self.err_reduction_at_step[table_col_ix:])
-            or table_col_ix == self.table_size - 1
+        elif error_ratio > np.prod(
+            self.err_reduction_at_step[k_curr:k_target + self.check_window[1]]
         ):  # b) Convergence monitor: can we expect convergence in later steps?
             self.is_retry = True
             state = "too_slow_convergence"
@@ -546,7 +607,7 @@ class StepControllerExtrapK(StepControllerExtrap):
                 f"Step size reduction as error tolerance can't be reached with the current step size and table size."
             )
 
-        return next_k, next_step_mult, state
+        return next_ktarget, next_step_mult, state
 
 
 class StepControllerExtrapDummy(StepControllerExtrap):
@@ -564,6 +625,7 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+            False,  # not needed
             atol,
             rtol,
             norm,
@@ -574,20 +636,29 @@ class StepControllerExtrapDummy(StepControllerExtrap):
             dtype,
         )
 
+    def initialize_scheme(
+        self,
+        table_size: int,
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
+        check_window: tuple[int, int] = (0, 0)
+    ):
+        super().initialize_scheme(
+            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
+        )
+
     @override
     def evaluate_step(
         self,
-        table_col_ix: int,
+        error_ratio: float,
+        k_curr: int,
         k_target: int,
-        error: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        x_table: NDArray[np.floating],
     ) -> tuple[int, float, contr_ext_state_type]:
         next_step_mult = 1.0  # we do not want to change the step size
-        next_k = k_target
+        next_ktarget = k_target
         state: contr_ext_state_type = "continue"
 
-        if table_col_ix >= k_target:
+        if k_curr >= k_target:
             state = "accepted"
 
-        return next_k, next_step_mult, state
+        return next_ktarget, next_step_mult, state

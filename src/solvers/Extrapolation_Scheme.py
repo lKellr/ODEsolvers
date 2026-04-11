@@ -138,10 +138,11 @@ class ExtrapolationSolver(ABC):
             [self._fevals_per_base_solve(n_ss) for n_ss in substep_seq], dtype=int
         )  # cached for solve_info
 
-        self.require_jacobian = False
+        self.impl_base_scheme = False
 
         if step_controller is None:
             step_controller = StepControllerExtrapKH(
+                is_symmetric=is_symmetric
                 dtype=dtype,
             )
         self.step_controller = step_controller
@@ -163,14 +164,14 @@ class ExtrapolationSolver(ABC):
         else:
             self.implicit_rel_costs = implicit_rel_costs
 
-        self.require_jacobian = require_jacobian
-        if jac_fun is None and self.require_jacobian:
+        self.impl_base_scheme = require_jacobian
+        if jac_fun is None and self.impl_base_scheme:
             self.jac_fun = lambda t, x: numerical_jacobian_t(
                 t, x, self.ode_fun, delta=1e-12
             )
             if implicit_rel_costs is None:
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
-        elif self.require_jacobian:
+        elif self.impl_base_scheme:
             assert jac_fun is not None
             self.jac_fun = jac_fun
 
@@ -233,8 +234,8 @@ class ExtrapolationSolver(ABC):
         allow_full_order_variation: bool = False,
     ) -> tuple[NDArray[np.floating], int, float, bool, dict[str, Any]]:
         """Performs an extrapolation step of x0 until t + step_size"""
-        err = np.empty_like(x_curr)
-        err_prev = np.empty_like(x_curr)  # required for overflow remedy
+        err_ratio: float = self.dtype(-1.)
+        err_ratio_prev: float = self.dtype(-1.)  # required for overflow remedy
 
         step_info: dict[str, Any] = dict(
             n_feval=0,
@@ -246,8 +247,8 @@ class ExtrapolationSolver(ABC):
         # calculate initial jacobian, will be reused at the start of each extrapolation step
         jac0 = None
         if (
-            self.require_jacobian
-        ):  # TODO: recompute only if theta is above some tolerance
+            self.impl_base_scheme
+        ):  # TODO: recompute only if theta is above some tolerance, reuse if it is a retry!
             jac0 = self.jac_fun(t_curr, x_curr)
 
         # this is allocated with max size, alternative would be to extend the size each loop iteration, not sure if this would be smart in terms of repeated allocation performance cost
@@ -260,58 +261,69 @@ class ExtrapolationSolver(ABC):
             jac0=jac0,
         )
 
-        state: contr_ext_state_type | Literal["divergence"] = (
+        state: contr_ext_state_type = (
             "continue" if not is_diverging else "divergence"
         )
-        next_k = -1
-        next_step_mult = -1.0
-        iterator_table = 0
+        k_curr = 0
         while state == "continue":
-            iterator_table += 1
+            k_curr += 1
             # Basic operations: compute with more steps, then fill row in tableau
             T_fine_first_order, is_diverging = self.base_scheme(
                 x_curr,
                 t_curr,
                 t_max=t_curr + step_size,
-                n_steps=self.substep_seq[iterator_table],
+                n_steps=self.substep_seq[k_curr],
                 jac0=jac0,
             )
-            self.fill_extrapolation_table(T_fine_first_order, T_table_k, iterator_table)
-            err_prev = err
-            err = np.abs(T_table_k[iterator_table - 1] - T_table_k[iterator_table])
+            if(is_diverging):
+                state = "divergence"
+                break
 
-            logger.debug(f"Stage reached: {iterator_table}, error: {err}")
+            last_table_diag= T_table_k[k_curr-1]
+            self.fill_extrapolation_table(T_fine_first_order, T_table_k, k_curr)
 
+            # TODO: only do this for implicit schemes, or when inside reduction window
+            # if self.require_jacobian or k_curr >= k_target - 2:
+            err_ratio_prev = err_ratio
+            err_ratio = self.step_controller.get_error(k_curr, k_target, T_table_k, x_curr, last_table_diag)
+
+            logger.debug(f"Stage reached: {k_curr}, error: {err_ratio}")
+
+                # # divergence monitor, only required for implicit methods
+                # if self.impl_base_scheme and ( # TODO: include this into evaluate_step
+                #     is_diverging or (k_curr >= 2 and err_ratio >= err_ratio_prev)
+                # ):  # Hairer & Wanner divergence monitor a)
+                #     state = "divergence"
             # exit conditions
-            if iterator_table >= k_target - 1 or allow_full_order_variation:
-                next_k, next_step_mult, state = self.step_controller.evaluate_step(
-                    iterator_table,
+            if k_curr >= k_target - self.step_controller.check_window[0] or allow_full_order_variation: # TODO: should this be moved to the controller?
+                state = self.step_controller.evaluate_step( # TODO: divergence will be checked too late
+                    err_ratio,
+                    k_curr,
                     k_target,
-                    err,
-                    x_curr,
-                    T_table_k[iterator_table],
                 )
 
-            # divergence monitor, only required for implicit methods
-            if self.require_jacobian and (
-                is_diverging or (iterator_table >= 2 and np.any(err >= err_prev))
-            ):  # Hairer & Wanner divergence monitor a)
-                next_k = k_target  # not sure if this is the correct way to do this, maybe k should even be decreased?
-                next_step_mult = self.step_controller.step_multiplier_divergence
-                self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
-                state = "divergence"
+        if state == "divergence":
+            next_ktarget = max(
+                k_curr, self.step_controller.k_min
+            )  # not sure if this is the correct way to do this, maybe k should even be decreased?
+            next_step_mult = self.step_controller.step_multiplier_divergence
+            self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
+        else:
+            # TODO: i could also move this to the calling function
+            # TODO: must be different for succesful retry and fail, maybe catch that in the check before?
+            !next_ktarget, next_step_mult = self.step_controller.get_next_parameters(k_curr, k_target)
 
         step_info["stop_reason"] = state
-        step_info["n_feval"] = self.n_fevals[iterator_table]
-        step_info["n_lu"] = self.require_jacobian * (
-            iterator_table + 1
+        step_info["n_feval"] = self.n_fevals[k_curr]
+        step_info["n_lu"] = s^elf.impl_base_scheme * (
+            k_curr + 1
         )  # When a Jacobian is present, i also perform a LU factorization
-        step_info["n_jaceval"] = 1 * self.require_jacobian
-        step_info["local_error"] = err
-        step_info["max_substeps"] = self.substep_seq[iterator_table]
+        step_info["n_jaceval"] = 1 * self.impl_base_scheme
+        step_info["local_error"] = err_ratio
+        step_info["max_substeps"] = self.substep_seq[k_curr]
         return (
-            T_table_k[iterator_table],
-            next_k,
+            T_table_k[k_curr],
+            next_ktarget,
             next_step_mult * step_size,
             state == "accepted",
             step_info,
@@ -349,6 +361,11 @@ class ExtrapolationSolver(ABC):
             )
         else:
             next_step = h_initial
+
+        assert next_step > 0, f"invalid initial step size {next_step}"
+        assert (
+            k_target >= 1 and k_target <= self.table_size - 1
+        ), f"invalid initial target order {k_target}"  # TODO: which window is valid?
 
         logger.debug(f"Beginning solve.")
 
