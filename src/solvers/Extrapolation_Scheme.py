@@ -232,10 +232,9 @@ class ExtrapolationSolver(ABC):
         k_target: int,
         step_size: float,
         allow_full_order_variation: bool = False,
-    ) -> tuple[NDArray[np.floating], int, float, bool, dict[str, Any]]:
+    ) -> tuple[NDArray[np.floating], bool, int, dict[str, Any]]:
         """Performs an extrapolation step of x0 until t + step_size"""
         err_ratio: float = self.dtype(-1.)
-        err_ratio_prev: float = self.dtype(-1.)  # required for overflow remedy
 
         step_info: dict[str, Any] = dict(
             n_feval=0,
@@ -279,53 +278,36 @@ class ExtrapolationSolver(ABC):
                 state = "divergence"
                 break
 
-            last_table_diag= T_table_k[k_curr-1]
+            last_table_diag= T_table_k[k_curr-1] # needs to be cached for error computation
             self.fill_extrapolation_table(T_fine_first_order, T_table_k, k_curr)
 
             # TODO: only do this for implicit schemes, or when inside reduction window
             # if self.require_jacobian or k_curr >= k_target - 2:
-            err_ratio_prev = err_ratio
+            # TODO: merge this with evaluate step and return error?
             err_ratio = self.step_controller.get_error(k_curr, k_target, T_table_k, x_curr, last_table_diag)
 
             logger.debug(f"Stage reached: {k_curr}, error: {err_ratio}")
 
-                # # divergence monitor, only required for implicit methods
-                # if self.impl_base_scheme and ( # TODO: include this into evaluate_step
-                #     is_diverging or (k_curr >= 2 and err_ratio >= err_ratio_prev)
-                # ):  # Hairer & Wanner divergence monitor a)
-                #     state = "divergence"
             # exit conditions
-            if k_curr >= k_target - self.step_controller.check_window[0] or allow_full_order_variation: # TODO: should this be moved to the controller?
-                state = self.step_controller.evaluate_step( # TODO: divergence will be checked too late
-                    err_ratio,
-                    k_curr,
-                    k_target,
-                )
-
-        if state == "divergence":
-            next_ktarget = max(
-                k_curr, self.step_controller.k_min
-            )  # not sure if this is the correct way to do this, maybe k should even be decreased?
-            next_step_mult = self.step_controller.step_multiplier_divergence
-            self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
-        else:
-            # TODO: i could also move this to the calling function
-            # TODO: must be different for succesful retry and fail, maybe catch that in the check before?
-            !next_ktarget, next_step_mult = self.step_controller.get_next_parameters(k_curr, k_target)
+            state = self.step_controller.evaluate_step(
+                err_ratio,
+                k_curr,
+                k_target,
+            )
 
         step_info["stop_reason"] = state
         step_info["n_feval"] = self.n_fevals[k_curr]
-        step_info["n_lu"] = s^elf.impl_base_scheme * (
+        step_info["n_lu"] = self.impl_base_scheme * (
             k_curr + 1
         )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.impl_base_scheme
         step_info["local_error"] = err_ratio
+        step_info["local_order"] = (k_curr + (not is_diverging))*(1 + self.is_symmetric) # TODO: check this
         step_info["max_substeps"] = self.substep_seq[k_curr]
         return (
             T_table_k[k_curr],
-            next_ktarget,
-            next_step_mult * step_size,
             state == "accepted",
+            k_curr,
             step_info,
         )
 
@@ -345,10 +327,11 @@ class ExtrapolationSolver(ABC):
             n_lu=0,  # initial one for implicit ODEs is not counted
             n_restarts=0,
             local_errors=[],
+            local_orders=[],
         )
 
         k_target: int
-        next_step: float
+        step: float
 
         if k_initial is None:
             k_target = self.step_controller.get_initial_ktarget()
@@ -356,13 +339,13 @@ class ExtrapolationSolver(ABC):
             k_target = k_initial
 
         if h_initial is None:
-            next_step = self.step_controller.get_initial_stepHW(
+            step = self.step_controller.get_initial_stepHW(
                 self.ode_fun, x0, t0=t0, p=k_target + 1
             )
         else:
-            next_step = h_initial
+            step = h_initial
 
-        assert next_step > 0, f"invalid initial step size {next_step}"
+        assert step > 0, f"invalid initial step size {step}"
         assert (
             k_target >= 1 and k_target <= self.table_size - 1
         ), f"invalid initial target order {k_target}"  # TODO: which window is valid?
@@ -376,19 +359,17 @@ class ExtrapolationSolver(ABC):
         current_time = t0
         while current_time < t_max:
             if (
-                current_time + next_step > t_max
+                current_time + step > t_max
             ):  # shorten h if we would go further than necessary
                 step = t_max - current_time
                 allow_full_order_variation = True
-            else:
-                step = next_step
 
             logger.debug(
                 f"Starting step at time {current_time:.3f} of {t_max} with k_target = {k_target}, h = {step:.2E}"
             )
 
             # do step
-            new_solution, k_target, next_step, accepted, step_info = (
+            new_solution, accepted, k_final, step_info = (
                 self.extrapolation_step(
                     current_time,
                     solution[-1],
@@ -397,31 +378,51 @@ class ExtrapolationSolver(ABC):
                     allow_full_order_variation,
                 )
             )
+            # reset full order variation for the first step
             if allow_full_order_variation:
                 allow_full_order_variation = False
 
-            # info
+            # update info
             solve_info["n_feval"] += step_info["n_feval"]
             solve_info["n_jaceval"] += step_info["n_jaceval"]
             solve_info["n_lu"] += step_info["n_lu"]
-            logger.debug(
-                "Finished step\n"
-                + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
-                + "\n"
-            )
 
+            # check for acceptance
             if accepted:
-                current_time += step
+                # save solution
                 solution.append(new_solution)
-                time.append(current_time)
-
+                time.append(current_time + step)
                 solve_info["local_errors"].append(
                     self.step_controller.norm(step_info["local_error"])
                 )
+                solve_info["local_orders"].append(step_info["local_order"])
+
+                # update time and parameters for the next step
+                current_time += step # TODO: this has to be done before storing the solution!
+
+                # TODO: must be different for succesful retry and fail, maybe catch that in the check before?
+                k_target, next_step_mult = self.step_controller.get_next_parameters(k_final, k_target)
+                step *= next_step_mult
+
+                logger.debug(
+                    "Finished step\n"
+                    + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
+                    + "\n"
+                )
 
             else:
-                logger.debug(f"Retrying step with h = {step:.2E}")
                 solve_info["n_restarts"] += 1
+
+                k_target = max(
+                    k_final, self.step_controller.k_min
+                )  # not sure if this is the correct way to do this, maybe k should even be decreased?
+                step *= self.step_controller.step_multiplier_divergence
+                self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
+
+                logger.debug(f"Rejected step, retrying with h = {step:.2E}"
+                                                 + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
+                    + "\n"
+                )
 
         # finished
         logger.debug(
