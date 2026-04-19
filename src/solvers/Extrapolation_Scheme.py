@@ -234,7 +234,7 @@ class ExtrapolationSolver(ABC):
         allow_full_order_variation: bool = False,
     ) -> tuple[NDArray[np.floating], bool, int, dict[str, Any]]:
         """Performs an extrapolation step of x0 until t + step_size"""
-        err_ratio: float = self.dtype(-1.)
+        error: NDArray[np.floating] = np.empty_like(x_curr)
 
         step_info: dict[str, Any] = dict(
             n_feval=0,
@@ -262,7 +262,7 @@ class ExtrapolationSolver(ABC):
 
         state: contr_ext_state_type = (
             "continue" if not is_diverging else "divergence"
-        )
+        ) # TODO: retry flag is not set if i diverge here
         k_curr = 0
         while state == "continue":
             k_curr += 1
@@ -274,23 +274,26 @@ class ExtrapolationSolver(ABC):
                 n_steps=self.substep_seq[k_curr],
                 jac0=jac0,
             )
-            if(is_diverging):
+            if(is_diverging): # early exit: we don't have to calculate the next result and check the error if we are already diverging
+                logger.debug(f"Early exit in stage {k_curr} due to divergence in the solver")
                 state = "divergence"
+                self.step_controller.is_retry = True # TODO: i should move this flag out of the controller
                 break
 
             last_table_diag= T_table_k[k_curr-1] # needs to be cached for error computation
             self.fill_extrapolation_table(T_fine_first_order, T_table_k, k_curr)
 
-            # TODO: only do this for implicit schemes, or when inside reduction window
-            # if self.require_jacobian or k_curr >= k_target - 2:
-            # TODO: merge this with evaluate step and return error?
-            err_ratio = self.step_controller.get_error(k_curr, k_target, T_table_k, x_curr, last_table_diag)
+            error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
+            # TODO: just temporary, last_table_diag is also not really required
+            error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
+            error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.step_controller.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
+            print(f"errors: {error}, {error_d}, {error_de}")
 
-            logger.debug(f"Stage reached: {k_curr}, error: {err_ratio}")
+            logger.debug(f"Stage reached: {k_curr}, error: {error}")
 
             # exit conditions
             state = self.step_controller.evaluate_step(
-                err_ratio,
+                error,
                 k_curr,
                 k_target,
             )
@@ -301,8 +304,8 @@ class ExtrapolationSolver(ABC):
             k_curr + 1
         )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.impl_base_scheme
-        step_info["local_error"] = err_ratio
-        step_info["local_order"] = (k_curr + (not is_diverging))*(1 + self.is_symmetric) # TODO: check this
+        step_info["local_error"] = error
+        step_info["local_order"] = (k_curr + (not is_diverging))*(1 + self.is_symmetric)
         step_info["max_substeps"] = self.substep_seq[k_curr]
         return (
             T_table_k[k_curr],
@@ -390,17 +393,15 @@ class ExtrapolationSolver(ABC):
             # check for acceptance
             if accepted:
                 # save solution
+                current_time += step
                 solution.append(new_solution)
-                time.append(current_time + step)
+                time.append(current_time)
                 solve_info["local_errors"].append(
                     self.step_controller.norm(step_info["local_error"])
                 )
                 solve_info["local_orders"].append(step_info["local_order"])
 
-                # update time and parameters for the next step
-                current_time += step # TODO: this has to be done before storing the solution!
-
-                # TODO: must be different for succesful retry and fail, maybe catch that in the check before?
+                # find ideal parameters for the next step
                 k_target, next_step_mult = self.step_controller.get_next_parameters(k_final, k_target)
                 step *= next_step_mult
 
@@ -413,11 +414,12 @@ class ExtrapolationSolver(ABC):
             else:
                 solve_info["n_restarts"] += 1
 
+                # TODO: call get_next_parameters?
                 k_target = max(
                     k_final, self.step_controller.k_min
                 )  # not sure if this is the correct way to do this, maybe k should even be decreased?
-                step *= self.step_controller.step_multiplier_divergence
-                self.step_controller.is_retry = True  # set retry flag so that order and step size are not allowed to increase during retry
+                
+                step *= self.step_controller.step_multiplier_divergence # TODO: only if there is actually divergence
 
                 logger.debug(f"Rejected step, retrying with h = {step:.2E}"
                                                  + "\n".join([f"{k}: {v}" for k, v in step_info.items()])

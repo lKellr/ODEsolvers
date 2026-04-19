@@ -257,19 +257,6 @@ class StepControllerExtrap(StepController, ABC):
         k_target = max(1, min(self.table_size - 1, int(log_fact)))
         return k_target
 
-    def get_error(
-        self,
-        k_curr: int,
-        k_target: int,
-        T_table_k: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        last_table_diag: NDArray[np.floating],
-    ) -> float:
-        error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
-
-        error_ratio = self._get_error_ratio(error, x_curr, T_table_k[k_curr])
-        return error_ratio
-
     def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
         """returns the optimal factor by which the step should be multiplied to reach the prescribed tolerance levels"""
         order_exponent = (
@@ -293,10 +280,10 @@ class StepControllerExtrap(StepController, ABC):
     @abstractmethod
     def evaluate_step(
         self,
-        error_ratio: float,
+        error: float,
         k_curr: int,
         k_target: int,
-    ) -> tuple[int, float, contr_ext_state_type]:
+    ) -> contr_ext_state_type:
         raise NotImplementedError()
 
 
@@ -349,31 +336,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
         chk_wd_size = check_window[0] + check_window[1] + 1
         self.opt_step_mult_k = np.empty((chk_wd_size + 1,), self.dtype)
 
-    @override
-    def get_error(
-        self,
-        k_curr: int,
-        k_target: int,
-        T_table_k: NDArray[np.floating],
-        x_curr: NDArray[np.floating],
-        last_table_diag: NDArray[np.floating],
-    ) -> float:
-        error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
-
-        # TODO: just temporary
-        error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
-        error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
-        print(f"errors: {error}, {error_d}, {error_de}")
-
-        error_ratio = self._get_error_ratio(error, x_curr, T_table_k[k_curr])
-        if (
-            k_curr >= k_target - self.check_window[0] - 1
-        ):  # TODO: first entry only required if we have convergence in the first window column (i could calcualte the corresponding error from the tableau?)
-            self.opt_step_mult_k[k_curr - k_target + self.check_window[0] + 1] = self._get_step_mult_opt(
-                error_ratio, k_curr
-            )  # cache this as error computation is expensive
-        return error_ratio
-
     def _get_most_efficient_params(self, k_check: int, k_window_pos: int) -> tuple[int, float]:
         assert k_check >= self.k_min and k_check <= self.k_max, "Values outside the allowed range should not be checked"
 
@@ -418,7 +380,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         next_step_mult = -1.0
 
         if k_curr < k_target + self.check_window[1]:
-            next_ktarget, next_step_mult = self._get_most_efficient_params(k_curr, k_curr - k_target + self.check_window[0] + 1, self.is_retry)
+            next_ktarget, next_step_mult = self._get_most_efficient_params(k_curr, k_curr - k_target + self.check_window[0] + 1)
         else:
             s_decreased = self.opt_step_mult_k[-3]  # NOTE: might not be initialized
             s_target = self.opt_step_mult_k[-2]
@@ -449,34 +411,47 @@ class StepControllerExtrapKH(StepControllerExtrap):
             next_ktarget = min(k_target, next_ktarget)
             # next_ktarget = min(k_curr, next_ktarget) # TODO: which version?
             next_step_mult = min(1, next_step_mult)
+            self.is_retry = False
         return next_ktarget, next_step_mult
 
 
     @override
     def evaluate_step(
         self,
-        error_ratio: float,
+        error: NDArray[np.floating],
         k_curr: int,
         k_target: int,
     ) -> contr_ext_state_type:
         
         state: contr_ext_state_type = "continue"
 
-        if(k_curr >= 2 and error_ratio >= err_ratio_prev):  # Hairer & Wanner divergence monitor a)
+        if self.impl_base_scheme or k_curr >= k_target - self.check_window[0] -1: # TODO: this should be the reduction window! with NR first entry only required if we have convergence in the first window column, H&W does not require it at all and Deuflhart requires the eror ratio for all steps
+            error_ratio = self._get_error_ratio(error, x_curr, T_table_k[k_curr])
+            self.opt_step_mult_k[k_curr - k_target + self.check_window[0] + 1] = self._get_step_mult_opt(
+                error_ratio, k_curr
+            )  # cache this as error computation is expensive
+            # TODO: divergence check requires error ratio instead of step multiplier
+            self.error_ratio_k[?] = error_ratio
+            logger.debug(f"Evaluating step, error ratio: {error_ratio}")
+
+        # TODO: should i run this check even for explicit schemes? maybe implicit and explicit versions of this function?
+        if(k_curr >= 2 and error_ratio >= self.error_ratio_k[?]):  # Hairer & Wanner divergence monitor a)
             state = "divergence"
-        # TODO: this check removes possibility for full order variation!
-        elif k_curr <= k_target + self.check_window[1]:
+            self.is_retry = True
+        elif k_curr >= k_target - self.check_window[0] or allow_full_order_variation:
             if (
                 error_ratio <= 1.0
             ):  # a) Convergence in line k_target − 1; or  k_target
                 state = "accepted"
-            elif error_ratio > np.prod(
+            elif error_ratio <= np.prod(
                 self.err_reduction_at_step[
                     k_curr : k_target + self.check_window[1]
-                ]  # TODO: check this product
-            ):  # b) Convergence monitor: can we expect convergence in later steps?
-                self.is_retry = True # TODO: required?
+                ]
+            ):  # Convergence monitor: can we expect convergence in later steps?
+                state = "continue"
+            else:
                 state = "too_slow_convergence"
+                self.is_retry = True
         return state
 
 
