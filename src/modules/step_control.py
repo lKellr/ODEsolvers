@@ -336,42 +336,8 @@ class StepControllerExtrapKH(StepControllerExtrap):
         chk_wd_size = check_window[0] + check_window[1] + 1
         self.opt_step_mult_k = np.empty((chk_wd_size + 1,), self.dtype)
 
-    def _get_most_efficient_params(self, k_check: int, k_window_pos: int) -> tuple[int, float]:
-        assert k_check >= self.k_min and k_check <= self.k_max, "Values outside the allowed range should not be checked"
-
-        # TODO: only works inside of a narrow window
-        # TODO: clamp to h_max before work computation
-        s_decreased = self.opt_step_mult_k[k_window_pos-1] # NOTE: might not be initialized
-        s_same = self.opt_step_mult_k[k_window_pos]
-        s_increased = 
-            s_same
-            * self.total_feval_cost_for_k[k_check + 1]
-            / self.total_feval_cost_for_k[k_check]
-
-
-        work_decreased = self.total_feval_cost_for_k[k_check - 1] / s_decreased
-        work_same = (
-            self.total_feval_cost_for_k[k_check] / s_same
-        )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
-
-        next_ktarget: int
-        next_s: float
-        if (
-            work_decreased < self.work_order_limits[0] * work_same and k_check - 1 >= self.k_min
-        ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
-            next_ktarget = k_check - 1  # order decrease/double decrease
-        elif (
-            work_same < self.work_order_limits[1] * work_decreased
-            and k_check + 1 <= self.k_max
-        ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. This is still accurate since we are close to the optimal value, where the work costs are almost equal?
-            next_ktarget = k_check + 1  # order increase / constant
-        else:
-            next_ktarget = k_check  # order constant / decrease
-        
-        return next_ktarget, next_s
-
     @override
-    def get_next_parameters(
+    def get_most_efficient_parameters(
         self,
         k_curr: int,
         k_target: int,
@@ -379,17 +345,47 @@ class StepControllerExtrapKH(StepControllerExtrap):
         next_ktarget = -1
         next_step_mult = -1.0
 
+        assert k_curr >= self.k_min and k_curr <= self.k_max, "Values outside the allowed range should not be checked"
+
         if k_curr < k_target + self.check_window[1]:
-            next_ktarget, next_step_mult = self._get_most_efficient_params(k_curr, k_curr - k_target + self.check_window[0] + 1)
-        else:
-            s_decreased = self.opt_step_mult_k[-3]  # NOTE: might not be initialized
-            s_target = self.opt_step_mult_k[-2]
-            s_last = self.opt_step_mult_k[-1]
+            # TODO: only works inside of a narrow window
+            # TODO: clamp to h_max before work computation
+            s_decreased = self.opt_step_mult_k[k_window_pos-1] # NOTE: might not be initialized
+            s_same = self.opt_step_mult_k[k_window_pos]
+            s_increased = 
+                s_same
+                * self.total_feval_cost_for_k[k_check + 1]
+                / self.total_feval_cost_for_k[k_check]
 
-            work_decreased = self.total_feval_cost_for_k[k_target - 1] / s_decreased
-            work_target = self.total_feval_cost_for_k[k_target] / s_target
-            work_last = self.total_feval_cost_for_k[k_target + 1] / s_last
 
+            work_decreased = self.total_feval_cost_for_k[k_check - 1] / s_decreased
+            work_same = (
+                self.total_feval_cost_for_k[k_check] / s_same
+            )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
+
+            next_ktarget: int
+            next_s: float
+            if (
+                work_decreased < self.work_order_limits[0] * work_same and k_check - 1 >= self.k_min
+            ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
+                next_ktarget = k_check - 1  # order decrease/double decrease
+            elif (
+                work_same < self.work_order_limits[1] * work_decreased
+                and k_check + 1 <= self.k_max
+            ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. This is still accurate since we are close to the optimal value, where the work costs are almost equal?
+                next_ktarget = k_check + 1  # order increase / constant
+            else:
+                next_ktarget = k_check  # order constant / decrease
+        else: # different variant at edge of check window to allow for reduction down to the start of the window
+            assert k_curr == k_target+1, "k for next parameter outside of the allowable window"
+            s_decreased = self._get_step_mult_opt(self.error_ratios_k[k_curr-3], k_curr-2)  # NOTE: might not be initialized
+            s_target = self._get_step_mult_opt(self.error_ratios_k[k_curr-2], k_curr-1)
+            s_last = self._get_step_mult_opt(self.error_ratios_k[k_curr-1], k_curr)
+
+            work_decreased = self.total_feval_cost_for_k[k_curr - 2] / s_decreased
+            work_target = self.total_feval_cost_for_k[k_curr-2] / s_target
+            work_last = self.total_feval_cost_for_k[k_curr] / s_last
+                
             next_ktarget = k_target
             next_step_mult = s_target
             work_temp_faster = work_target

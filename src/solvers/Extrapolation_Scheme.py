@@ -420,6 +420,7 @@ class ExtrapolationSolver(ABC):
                 )  # not sure if this is the correct way to do this, maybe k should even be decreased?
                 
                 step *= self.step_controller.step_multiplier_divergence # TODO: only if there is actually divergence
+                TODO: allow for early checks after divergence
 
                 logger.debug(f"Rejected step, retrying with h = {step:.2E}"
                                                  + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
