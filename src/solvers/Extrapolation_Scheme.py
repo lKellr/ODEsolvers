@@ -876,27 +876,21 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             rhs = delta_t * self.ode_fun(t_n, x_n)
             delta_x: NDArray[np.floating] = lu_solve(
                 lu_and_piv, rhs, overwrite_b=False, check_finite=False
-            )  # TODO: i can not overwrite b here because of the convergence check
-            x_n = x_n + delta_x
+            )  # NOTE: i can not overwrite b here because of the convergence check
+            x_n += delta_x
             t_n += delta_t
 
             if n == 0:
-                delta_x_0 = delta_x
-            elif (
-                n == 1
-                and self.norm(
-                    lu_solve(
+                delta_x_0 = delta_x # cache for stability check
+            elif (n == 1):  # stability check
+                theta = lu_solve( # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
                         lu_and_piv,
-                        b=rhs
-                        - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                        b=rhs - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
                         overwrite_b=True,
                         check_finite=False,
-                    )
-                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
-                )
-                > 1.0
-            ):  # stability check
-                return x_n, True
+                    ) / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                if self.norm(theta) > 1.0:
+                    return x_n, True
             # delta_x_prev = delta_x
         return x_n, False
 
@@ -992,14 +986,14 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
             delta_x = delta_x + lu_solve(
                 lu_and_piv, rhs, overwrite_b=False, check_finite=False
-            )  # TODO: i can not overwrite b here because of the convergence check
-            x_n = x_n + delta_x
+            )  # NOTE: i can not overwrite b here because of the convergence check
+            x_n += delta_x
             t_n += delta_t
 
-            if (
-                n == 1 and self.norm(0.5 * (delta_x - delta_x_0) / delta_x_0) > 1.0
-            ):  # stability check
-                return x_n, True
+            if (n == 1): # stability check
+                theta = 0.5 * (delta_x - delta_x_0) / delta_x_0 # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
+                if self.norm(theta) > 1.0:  
+                    return x_n, True
 
         if (
             self.use_smoothing
