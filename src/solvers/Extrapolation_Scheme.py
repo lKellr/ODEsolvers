@@ -402,8 +402,11 @@ class ExtrapolationSolver(ABC):
                 solve_info["local_orders"].append(step_info["local_order"])
 
                 # find ideal parameters for the next step
-                k_target, next_step_mult = self.step_controller.get_next_parameters(k_final, k_target)
-                step *= next_step_mult
+                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, not is_retry) # TODO: different alow_order increase than failed
+                if is_retry:
+                    step *= min(1, next_step_mult)
+                else:
+                    step *= next_step_mult
 
                 logger.debug(
                     "Finished step\n"
@@ -413,6 +416,8 @@ class ExtrapolationSolver(ABC):
 
             else:
                 solve_info["n_restarts"] += 1
+
+                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, False) # TODO: different alow_order increase than retry
 
                 # TODO: call get_next_parameters?
                 k_target = max(
