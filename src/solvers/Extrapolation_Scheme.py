@@ -69,7 +69,7 @@ class ExtrapolationSolver(ABC):
             if is_symmetric:
                 substep_seq *= 2
         elif substep_seq == "Romberg":
-            substep_seq = np.array([2**i for i in range(table_size + 1)], dtype=int)
+            substep_seq = np.array([2**i for i in range(table_size)], dtype=int)
             if is_symmetric:
                 substep_seq *= 2
         elif substep_seq == "Bulirsch":
@@ -109,6 +109,7 @@ class ExtrapolationSolver(ABC):
             ).all(), "step sequence for symmetric methods must be even to reach expected convergence rates"
         self.substep_seq = substep_seq
         self.is_symmetric = is_symmetric
+        self.order_exponent = 2 if is_symmetric else 1
         self.table_size: int = table_size
         self.dtype = dtype
 
@@ -121,7 +122,7 @@ class ExtrapolationSolver(ABC):
                             1.0
                             / (
                                 (self.substep_seq[k] / self.substep_seq[k - j])
-                                ** (1 + self.is_symmetric)
+                                ** self.order_exponent
                                 - 1.0
                             )
                         )
@@ -189,7 +190,7 @@ class ExtrapolationSolver(ABC):
     def _init_controller(self, total_feval_cost_for_k: NDArray[np.floating]):
         err_reduction_at_step = np.array(
             [
-                (self.substep_seq[k] / self.substep_seq[0]) ** (1 + self.is_symmetric)
+                (self.substep_seq[k] / self.substep_seq[0]) ** self.order_exponent
                 for k in range(1, self.table_size)
             ],
             dtype=self.dtype,
@@ -237,10 +238,12 @@ class ExtrapolationSolver(ABC):
         error: NDArray[np.floating] = np.empty_like(x_curr)
 
         step_info: dict[str, Any] = dict(
+            stop_reason = "continue",
             n_feval=0,
             n_jaceval=0,
             n_lu=0,
             local_error=np.nan,
+            local_order=-1,
             max_substeps=np.nan,
         )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
@@ -305,7 +308,7 @@ class ExtrapolationSolver(ABC):
         )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.impl_base_scheme
         step_info["local_error"] = error
-        step_info["local_order"] = (k_curr + (not is_diverging))*(1 + self.is_symmetric)
+        step_info["local_order"] = (k_curr + (not is_diverging))*self.order_exponent
         step_info["max_substeps"] = self.substep_seq[k_curr]
         return (
             T_table_k[k_curr],
@@ -373,7 +376,7 @@ class ExtrapolationSolver(ABC):
 
             # do step
             new_solution, accepted, k_final, step_info = (
-                self.extrapolation_step(
+                extrapolation_step(
                     current_time,
                     solution[-1],
                     k_target if not allow_full_order_variation else self.table_size - 1,
@@ -402,7 +405,7 @@ class ExtrapolationSolver(ABC):
                 solve_info["local_orders"].append(step_info["local_order"])
 
                 # find ideal parameters for the next step
-                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, not is_retry) # TODO: different alow_order increase than failed
+                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, not is_retry) # TODO: different allow_order increase than failed
                 if is_retry:
                     step *= min(1, next_step_mult)
                 else:
@@ -416,22 +419,25 @@ class ExtrapolationSolver(ABC):
 
             else:
                 solve_info["n_restarts"] += 1
-
+                # TODO: i might have to include this into extrapolation_step or return the state
+                # TODO: slow convergence
                 k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, False) # TODO: different alow_order increase than retry
-
-                # TODO: call get_next_parameters?
-                k_target = max(
-                    k_final, self.step_controller.k_min
-                )  # not sure if this is the correct way to do this, maybe k should even be decreased?
-                
-                step *= self.step_controller.step_multiplier_divergence # TODO: only if there is actually divergence
-                TODO: allow for early checks after divergence
-
-                logger.debug(f"Rejected step, retrying with h = {step:.2E}"
+                logger.debug(f"Slowly converging step, retrying"
                                                  + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
                     + "\n"
                 )
 
+                # TODO: divergence
+                TODO: allow for early checks after divergence
+                k_target = max(
+                    k_final, self.step_controller.k_min
+                )  # not sure if this is the correct way to do this, maybe k should even be decreased?
+                step *= self.step_controller.step_multiplier_divergence # keep k but reduce the step size
+                logger.debug(f"Divergent step, retrying with shorter step"
+                                                 + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
+                    + "\n"
+                )
+                
         # finished
         logger.debug(
             "Finished\n"
@@ -596,7 +602,7 @@ class EulerExtrapolationRational(EulerExtrapolation):
                     (
                         (
                             (self.substep_seq[k] / self.substep_seq[k - j])
-                            ** (1 + self.is_symmetric)
+                            ** self.order_exponent
                             - 1.0
                         )
                         if j <= k
