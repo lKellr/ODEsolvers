@@ -418,6 +418,128 @@ class StepControllerExtrapKH(StepControllerExtrap):
     #                 self.is_retry = True
     #     return state
 
+    @override
+    def get_most_efficient_parameters(
+        self,
+        k_final: int,
+        allow_order_increase: bool,
+    ) -> tuple[int, float]:
+        next_ktarget = -1
+        next_step_mult = -1.0
+
+        assert (
+            k_final >= self.k_min and k_final <= self.k_max
+        ), "Values outside the allowed range should not be checked"
+
+        if k_final < k_target + self.check_window[1]:
+            s_decreased = self._get_step_mult_opt(
+                self.error_ratios_k[k_final - 2], k_final - 1
+            )  # NOTE: unavailable in the first step (k=1)
+            s_same = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
+
+            work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
+            work_same = (
+                self.total_feval_cost_for_k[k_final] / s_same
+            )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
+
+            next_ktarget: int
+            next_step_mult: float
+            if (
+                work_decreased < self.work_order_limits[0] * work_same
+                and k_final - 1 >= self.k_min
+            ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
+                next_ktarget = k_final - 1 # order decrease/target double decrease (start of window)
+                next_step_mult = s_decreased
+            elif (
+                work_same < self.work_order_limits[1] * work_decreased
+                and allow_order_increase
+                and k_final + 1 <= self.k_max
+            ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. We have assumed work_increased = work_check to find s_increased, so work_increased can not be computed from s_increased to perform the check
+                next_ktarget = k_final + 1  # order increase / target constant (start of window)
+                next_step_mult = (
+                    s_same
+                    * self.total_feval_cost_for_k[k_final + 1]
+                    / self.total_feval_cost_for_k[k_final]
+                )
+            else:
+                next_ktarget = k_final  # order constant / target decrease (start of window)
+                next_step_mult = s_same
+
+        else:  # different variant at edge of check window to allow for reduction down by two
+            s_decreased = self._get_step_mult_opt(
+                self.error_ratios_k[k_final - 3], k_final - 2
+            )  # NOTE: might not be initialized
+            s_target = self._get_step_mult_opt(
+                self.error_ratios_k[k_final - 2], k_final - 1
+            )
+            s_last = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
+
+            work_decreased = self.total_feval_cost_for_k[k_final - 2] / s_decreased
+            work_target = self.total_feval_cost_for_k[k_final - 2] / s_target
+            work_last = self.total_feval_cost_for_k[k_final] / s_last
+
+            next_ktarget = k_final-1
+            next_step_mult = s_target
+            work_temp_faster = work_target
+            if (
+                work_decreased < self.work_order_limits[0] * work_target
+                and k_final - 1 >= self.k_min
+            ):
+                next_ktarget = k_final - 2
+                next_step_mult = s_decreased
+                work_temp_faster = work_decreased
+
+            if (
+                work_last < self.work_order_limits[1] * work_temp_faster
+                and k_final + 1 <= self.k_max # TODO: and allow_order_increase if using the strict variant
+            ):
+                next_ktarget = k_final
+                next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
+        if self.is_retry:
+            # TODO: what if this is called in rejected step? this should not be used and is_retry should not be rejected -> move outside to calling function
+            # TODO: this limit will produce combinations that will not converge!
+            # TODO: this should be equal to !allow_order_increase
+            # next_ktarget = min(next_ktarget, k_curr)
+            next_ktarget = min(
+                next_ktarget, k_target
+            )  # NOTE: use the more conservstive version so its applicable to failed steps as well
+            next_step_mult = min(
+                1, next_step_mult
+            )  # next_step_mult has to be recomputed if next_ktarget is limited in line before -> difficult to implement i  calling function! (unless using allow_order_increase = False)
+            self.is_retry = False
+        return next_ktarget, next_step_mult
+
+
+class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
+    """Combined order and step size (k-h) controller for extrapolation methods. Following the strategy by Deulfhard, "Order and Stepsize Control in Extrapolation Methods", 1983.
+    The main difference to the strategy in the StepControllerExtrapKH is that its always possible to reduce the order down to k_min, instead of staying in the check window """
+
+    def __init__(
+        self,
+        is_symmetric: bool,
+        atol: float | NDArray[np.floating] = 10**-8,
+        rtol: float | NDArray[np.floating] = 10**-5,
+        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        safety_unscaled: float = (0.94),
+        safety_tol: float = (0.65),
+        s_limits_scaled: tuple[float, float] = (0.02, 4.0),
+        step_multiplier_divergence: float = 0.5,
+        dtype: DTypeLike = np.double,
+        work_order_limits: tuple[float, float] = (0.8, 0.9),
+    ) -> None:
+        super().__init__(
+            is_symmetric,
+            atol,
+            rtol,
+            norm,
+            safety_unscaled,
+            safety_tol,
+            s_limits_scaled,
+            step_multiplier_divergence,
+            dtype,
+        )
+        self.work_order_limits = work_order_limits
+
     def get_most_efficient_params_fullred_optimal(
         self,
         k_final: int,
@@ -511,99 +633,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
             next_ktarget = k_final
             next_s = s_check
         return next_ktarget, next_s
-
-    @override
-    def get_most_efficient_parameters(
-        self,
-        k_final: int,
-        allow_order_increase: bool,
-    ) -> tuple[int, float]:
-        next_ktarget = -1
-        next_step_mult = -1.0
-
-        assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
-
-        if k_final < k_target + self.check_window[1]:
-            s_decreased = self._get_step_mult_opt(
-                self.error_ratios_k[k_final - 2], k_final - 1
-            )  # NOTE: unavailable in the first step (k=1)
-            s_same = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
-
-            work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
-            work_same = (
-                self.total_feval_cost_for_k[k_final] / s_same
-            )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
-
-            next_ktarget: int
-            next_step_mult: float
-            if (
-                work_decreased < self.work_order_limits[0] * work_same
-                and k_final - 1 >= self.k_min
-            ):  # NOTE: this possible double decrease in k-1 appears in Numerical Recipes but not in Hairer&Wanner
-                next_ktarget = k_final - 1 # order decrease/target double decrease (start of window)
-                next_step_mult = s_decreased
-            elif (
-                work_same < self.work_order_limits[1] * work_decreased
-                and allow_order_increase
-                and k_final + 1 <= self.k_max
-            ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. We have assumed work_increased = work_check to find s_increased, so work_increased can not be computed from s_increased to perform the check
-                next_ktarget = k_final + 1  # order increase / target constant (start of window)
-                next_step_mult = (
-                    s_same
-                    * self.total_feval_cost_for_k[k_final + 1]
-                    / self.total_feval_cost_for_k[k_final]
-                )
-            else:
-                next_ktarget = k_final  # order constant / target decrease (start of window)
-                next_step_mult = s_same
-
-        else:  # different variant at edge of check window to allow for reduction down by two
-            s_decreased = self._get_step_mult_opt(
-                self.error_ratios_k[k_final - 3], k_final - 2
-            )  # NOTE: might not be initialized
-            s_target = self._get_step_mult_opt(
-                self.error_ratios_k[k_final - 2], k_final - 1
-            )
-            s_last = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
-
-            work_decreased = self.total_feval_cost_for_k[k_final - 2] / s_decreased
-            work_target = self.total_feval_cost_for_k[k_final - 2] / s_target
-            work_last = self.total_feval_cost_for_k[k_final] / s_last
-
-            next_ktarget = k_final-1
-            next_step_mult = s_target
-            work_temp_faster = work_target
-            if (
-                work_decreased < self.work_order_limits[0] * work_target
-                and k_final - 1 >= self.k_min
-            ):
-                next_ktarget = k_final - 2
-                next_step_mult = s_decreased
-                work_temp_faster = work_decreased
-
-            if (
-                work_last < self.work_order_limits[1] * work_temp_faster
-                and k_final + 1 <= self.k_max # TODO: and allow_order_increase if using the strict variant
-            ):
-                next_ktarget = k_final
-                next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
-        if self.is_retry:
-            # TODO: what if this is called in rejected step? this should not be used and is_retry should not be rejected -> move outside to calling function
-            # TODO: this limit will produce combinations that will not converge!
-            # TODO: this should be equal to !allow_order_increase
-            # next_ktarget = min(next_ktarget, k_curr)
-            next_ktarget = min(
-                next_ktarget, k_target
-            )  # NOTE: use the more conservstive version so its applicable to failed steps as well
-            next_step_mult = min(
-                1, next_step_mult
-            )  # next_step_mult has to be recomputed if next_ktarget is limited in line before -> difficult to implement i  calling function! (unless using allow_order_increase = False)
-            self.is_retry = False
-        return next_ktarget, next_step_mult
-
-
 class StepControllerExtrapH(StepControllerExtrap):
     """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller"""
 
