@@ -369,11 +369,11 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
         if (
             k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 1]
-        ):  # Hairer & Wanner divergence monitor a), does not have to be run for exxplicit schemes
+        ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
             self.is_retry = True
         elif k_curr >= k_target - self.check_window[0] or allow_early_check:
-            if error_ratio <= 1.0:  # a) Convergence in line k_target − 1; or  k_target
+            if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
             elif error_ratio < np.prod(
                 self.err_reduction_at_step[k_curr : k_target + self.check_window[1]]
@@ -608,7 +608,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
             next_ktarget = (
                 k_final + 1
             )  # order increase / target constant (start of window)
-            next_s = (
+            next_step_mult = (
                 s_check
                 * self.total_feval_cost_for_k[k_final + 1]
                 / self.total_feval_cost_for_k[k_final]
@@ -631,13 +631,16 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
                 work_target = work_decreased
                 work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
             next_ktarget = k_final
-            next_s = s_check
-        return next_ktarget, next_s
+            next_step_mult = s_check
+        return next_ktarget, next_step_mult
+    
 class StepControllerExtrapH(StepControllerExtrap):
-    """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller"""
+    """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller.
+    Default check_window is (0, 0). By setting a lower check-window, the controller exits early without computing all orders up to k_target if convergene is not to be expected"""
 
     def __init__(
         self,
+        k_target: int,
         is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
@@ -659,13 +662,14 @@ class StepControllerExtrapH(StepControllerExtrap):
             step_multiplier_divergence,
             dtype,
         )
+        self.k_target =k_target
 
     def initialize_scheme(
         self,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int] = None,
+        check_window: tuple[int, int] = (0, 0),
     ):
         super().initialize_scheme(
             table_size,
@@ -683,18 +687,22 @@ class StepControllerExtrapH(StepControllerExtrap):
         k_target: int,
         allow_early_check: bool = False,
     ) -> contr_ext_state_type:
+
         state: contr_ext_state_type = "continue"
 
-        error_ratio: float = self._get_error_ratio(error, x_curr, x_pred)
+        error_ratio = self._get_error_ratio(error, x_curr, x_pred)
         logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
 
-        if k_curr >= self.table_size - 1:
-            if error_ratio <= 1.0:
+        if (
+            k_curr >= 2 and error_ratio >= self.error_ratio
+        ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
+            state = "divergence"
+        elif k_curr >= self.k_target - self.check_window[0] or allow_early_check:
+            if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
             else:
-                self.is_retry = True
                 state = "too_slow_convergence"
-
+        self.error_ratio = error_ratio
         return state
 
     @override
@@ -703,13 +711,12 @@ class StepControllerExtrapH(StepControllerExtrap):
         k_final: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        next_ktarget = k_curr  # first check at next_k
-        next_step_mult = -1.0
+        assert k_final == self.k_target, "New parameters requested before all stages were completed"
 
-        next_step_mult = self._get_step_mult_opt(error_ratio, next_k)
-        if self.is_retry:
-            next_step_mult = min(1.0, next_step_mult)
-            self.is_retry = False
+        next_ktarget = self.k_target 
+        next_step_mult = self._get_step_mult_opt(self.error_ratio, k_final)
+
+        return next_ktarget, next_step_mult
 
 class StepControllerExtrapK(StepControllerExtrap):
     """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance"""
@@ -750,7 +757,6 @@ class StepControllerExtrapK(StepControllerExtrap):
             total_feval_cost_for_k,
             check_window=(self.table_size - 1, self.table_size - 1),
         )
-        self.n_failed = 0
 
     @override
     def evaluate_step(
@@ -770,9 +776,8 @@ class StepControllerExtrapK(StepControllerExtrap):
         if error_ratio <= 1.0:
             state = "accepted"
         elif error_ratio > np.prod(
-            self.err_reduction_at_step[k_curr : k_target + self.check_window[1]]
-        ):  # b) Convergence monitor: can we expect convergence in later steps?
-            self.is_retry = True
+            self.err_reduction_at_step[k_curr : ]
+        ):  # Convergence monitor: can we expect convergence in later steps?
             state = "too_slow_convergence"
             logger.warning(
                 f"Step size reduction as error tolerance can't be reached with the current step size and table size."
@@ -786,19 +791,9 @@ class StepControllerExtrapK(StepControllerExtrap):
         allow_order_increase: bool,
     ) -> tuple[int, float]:
         next_step_mult = 1.0
+        next_ktarget = self.table_size-1 # this stays unused
 
-        if failed:
-            next_step_mult = self.step_multiplier_divergence
-            self.n_failed += 1
-
-        elif self.is_retry:
-            next_step_mult = (
-                1.0 / self.step_multiplier_divergence**self.n_failed
-            )  # reset step size after a succesful step
-            self.n_failed = 0
-            self.is_retry = False
-
-        return k_target, next_step_mult
+        return next_ktarget, next_step_mult
 
 
 class StepControllerExtrapDummy(StepControllerExtrap):
