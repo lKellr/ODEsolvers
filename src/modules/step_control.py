@@ -370,7 +370,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
             k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 1]
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
-            self.is_retry = True
         elif k_curr >= k_target - self.check_window[0] or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
@@ -380,7 +379,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
                 state = "continue"
             else:
                 state = "too_slow_convergence"
-                self.is_retry = True
         logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
@@ -415,7 +413,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
     #                 state = "continue"
     #             else:
     #                 state = "too_slow_convergence"
-    #                 self.is_retry = True
     #     return state
 
     @override

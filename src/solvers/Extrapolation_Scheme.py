@@ -406,8 +406,9 @@ class ExtrapolationSolver(ABC):
 
                 # find ideal parameters for the next step
                 k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, not is_retry) # TODO: different allow_order increase than failed
-                if is_retry:
+                if is_retry: # TODO: maybe all of this should be handled in the step controller? (accepted/retry/rejected/divergence)
                     step *= min(1, next_step_mult)
+                    is_retry = False
                 else:
                     step *= next_step_mult
 
@@ -422,17 +423,20 @@ class ExtrapolationSolver(ABC):
                 # TODO: i might have to include this into extrapolation_step or return the state
                 # TODO: slow convergence
                 k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, False) # TODO: different alow_order increase than retry
+                is_retry = True
                 logger.debug(f"Slowly converging step, retrying"
                                                  + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
                     + "\n"
                 )
 
+
                 # TODO: divergence
-                TODO: allow for early checks after divergence
                 k_target = max(
                     k_final, self.step_controller.k_min
-                )  # not sure if this is the correct way to do this, maybe k should even be decreased?
+                )  # make sure that we start at least from k_min, even if the divergence happened early
                 step *= self.step_controller.step_multiplier_divergence # keep k but reduce the step size
+                is_retry = True # this keeps the step size from increasing too much
+                allow_full_order_variation = True # smaller step sizes might lead to earlier convergence, therefore we should check earlier
                 logger.debug(f"Divergent step, retrying with shorter step"
                                                  + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
                     + "\n"
