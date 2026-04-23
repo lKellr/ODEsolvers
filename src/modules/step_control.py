@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from csv import Error
 from typing import Any, Callable, Literal, NamedTuple, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -365,7 +366,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
         self.error_ratios_k[k_curr - 1] = (
             error_ratio  # cache this as error computation is expensive
         )
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
 
         if (
             k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 1]
@@ -382,6 +382,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
             else:
                 state = "too_slow_convergence"
                 self.is_retry = True
+        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     # @override
@@ -662,7 +663,8 @@ class StepControllerExtrapH(StepControllerExtrap):
             step_multiplier_divergence,
             dtype,
         )
-        self.k_target =k_target
+        self.k_target = k_target
+        self.error_ratio = np.nan
 
     def initialize_scheme(
         self,
@@ -691,7 +693,6 @@ class StepControllerExtrapH(StepControllerExtrap):
         state: contr_ext_state_type = "continue"
 
         error_ratio = self._get_error_ratio(error, x_curr, x_pred)
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
 
         if (
             k_curr >= 2 and error_ratio >= self.error_ratio
@@ -703,6 +704,7 @@ class StepControllerExtrapH(StepControllerExtrap):
             else:
                 state = "too_slow_convergence"
         self.error_ratio = error_ratio
+        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     @override
@@ -743,6 +745,7 @@ class StepControllerExtrapK(StepControllerExtrap):
             step_multiplier_divergence,
             dtype,
         )
+        self.error_ratio = np.nan
 
     def initialize_scheme(
         self,
@@ -771,17 +774,24 @@ class StepControllerExtrapK(StepControllerExtrap):
         state: contr_ext_state_type = "continue"
 
         error_ratio: float = self._get_error_ratio(error, x_curr, x_pred)
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
 
         if error_ratio <= 1.0:
             state = "accepted"
         elif error_ratio > np.prod(
             self.err_reduction_at_step[k_curr : ]
         ):  # Convergence monitor: can we expect convergence in later steps?
-            state = "too_slow_convergence"
-            logger.warning(
-                f"Step size reduction as error tolerance can't be reached with the current step size and table size."
-            )
+            if k_curr < self.table_size - 1:
+                state = "continue"
+                logger.warning(
+                    f"Error tolerance will probably not be met until the end of the table. Continuing anyway."
+                )
+            else:
+                state = "accepted"
+                logger.critical(
+                    f"Error tolerance can't be met with the current step and table size. Continuing anyway."
+                )
+
+        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     @override
@@ -845,14 +855,15 @@ class StepControllerExtrapDummy(StepControllerExtrap):
     ) -> contr_ext_state_type:
         state: contr_ext_state_type = "continue"
 
-        error_ratio: float = self._get_error_ratio(error, x_curr, x_pred)
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
+        error_ratio = -1.0
+        if logger.isEnabledFor(logging.DEBUG):
+            error_ratio = self._get_error_ratio(error, x_curr, x_pred)
 
         if k_curr >= k_target:
             state = "accepted"
         else:
             state = "continue"
-
+        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     @override
