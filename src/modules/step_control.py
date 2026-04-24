@@ -220,7 +220,6 @@ class StepControllerExtrap(StepController, ABC):
 
     def __init__(
         self,
-        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -232,7 +231,6 @@ class StepControllerExtrap(StepController, ABC):
     ) -> None:
         super().__init__(atol, rtol, norm, safety_tol)
 
-        self.is_symmetric = is_symmetric
         self.safety_unscaled = safety_unscaled
         self.s_limits_scaled = s_limits_scaled
         self.step_multiplier_divergence = step_multiplier_divergence
@@ -241,11 +239,13 @@ class StepControllerExtrap(StepController, ABC):
 
     def initialize_scheme(
         self,
+        is_symmetric: bool,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
         check_window: tuple[int, int],
     ):
+        self.is_symmetric = is_symmetric
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
         self.total_feval_cost_for_k = total_feval_cost_for_k
@@ -306,7 +306,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
     def __init__(
         self,
-        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -318,7 +317,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
         work_order_limits: tuple[float, float] = (0.8, 0.9),
     ) -> None:
         super().__init__(
-            is_symmetric,
             atol,
             rtol,
             norm,
@@ -336,13 +334,14 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
     def initialize_scheme(
         self,
+        is_symmetric: bool,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
         check_window: tuple[int, int] = (1, 1),
     ):
         super().initialize_scheme(
-            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
+            is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
         )
         self.k_min = 1
         self.k_max: int = table_size - 1  # NOTE: Hairer & Wanner use table_size - 2
@@ -505,7 +504,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
 
     def __init__(
         self,
-        is_symmetric: bool,
+        is_greedy: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -517,7 +516,6 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
         work_order_limits: tuple[float, float] = (0.8, 0.9),
     ) -> None:
         super().__init__(
-            is_symmetric,
             atol,
             rtol,
             norm,
@@ -527,6 +525,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
             step_multiplier_divergence,
             dtype,
         )
+        self.is_greedy = is_greedy
         self.work_order_limits = work_order_limits
 
     def get_most_efficient_params_fullred_optimal(
@@ -630,7 +629,6 @@ class StepControllerExtrapH(StepControllerExtrap):
     def __init__(
         self,
         k_target: int,
-        is_symmetric: bool,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -641,7 +639,6 @@ class StepControllerExtrapH(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
-            is_symmetric,
             atol,
             rtol,
             norm,
@@ -655,12 +652,14 @@ class StepControllerExtrapH(StepControllerExtrap):
 
     def initialize_scheme(
         self,
+        is_symmetric: bool,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
         check_window: tuple[int, int] = (0, 0),
     ):
         super().initialize_scheme(
+            is_symmetric,
             table_size,
             err_reduction_at_step,
             total_feval_cost_for_k,
@@ -720,7 +719,6 @@ class StepControllerExtrapK(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
-            False,  # not needed
             atol,
             rtol,
             norm,
@@ -734,12 +732,14 @@ class StepControllerExtrapK(StepControllerExtrap):
 
     def initialize_scheme(
         self,
+        is_symmetric: bool,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
         check_window: tuple[int, int] = None,
     ):
         super().initialize_scheme(
+            is_symmetric,
             table_size,
             err_reduction_at_step,
             total_feval_cost_for_k,
@@ -806,7 +806,6 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
-            False,  # not needed
             atol,
             rtol,
             norm,
@@ -819,13 +818,14 @@ class StepControllerExtrapDummy(StepControllerExtrap):
 
     def initialize_scheme(
         self,
+        is_symmetric: bool,
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
         check_window: tuple[int, int] = (0, 0),
     ):
         super().initialize_scheme(
-            table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
+            is_symmetric,table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
         )
 
     @override
