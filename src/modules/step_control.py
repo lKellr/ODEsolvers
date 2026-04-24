@@ -298,6 +298,40 @@ class StepControllerExtrap(StepController, ABC):
         allow_order_increase: bool,
     ) -> tuple[int, float]:
         raise NotImplementedError()
+    
+    def get_next_step(self, state: contr_ext_state_type):
+        raise NotImplementedError()
+        if state == "accepted":
+            k_target, next_step_mult = (
+                self.step_controller.get_most_efficient_parameters(
+                    k_final, k_target, not is_retry
+                )
+            )  # TODO: different allow_order increase than failed
+            if (
+                is_retry
+            ):  # TODO: maybe all of this should be handled in the step controller? (accepted/retry/rejected/divergence)
+                step *= min(1, next_step_mult)
+                is_retry = False
+            else:
+                step *= next_step_mult
+        elif state == "too_slow_convergence":
+            k_target, next_step_mult = (
+                self.step_controller.get_most_efficient_parameters(
+                    k_final, k_target, False
+                )
+            )  # TODO: different alow_order increase than retry
+            is_retry = True
+        elif state == "divergence":
+            k_target = max(
+                k_final, self.step_controller.k_min
+            )  # make sure that we start at least from k_min, even if the divergence happened early
+            step *= (
+                self.step_controller.step_multiplier_divergence
+            )  # keep k but reduce the step size
+            is_retry = True  # this keeps the step size from increasing too much
+            allow_full_order_variation = True  # smaller step sizes might lead to earlier convergence, therefore we should check earlier
+        else:
+            raise Exception()
 
 
 class StepControllerExtrapKH(StepControllerExtrap):

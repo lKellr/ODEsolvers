@@ -361,6 +361,7 @@ class ExtrapolationSolver(ABC):
         time = [t0]
         solution = [x0.astype(self.dtype)]
 
+        is_retry = False
         allow_full_order_variation = True  # allow quick order variation for first and last steps when target order is not optimal
         current_time = t0
         while current_time < t_max:
