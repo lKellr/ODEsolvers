@@ -9,7 +9,7 @@ def find_local_errors(
     x_dot: Callable[[NDArray[np.floating]], NDArray[np.floating]],
     t: NDArray[np.floating],
     x_computed: NDArray[np.floating],
-    norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+    norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
 ) -> NDArray[np.floating]:
     """computes the local error using DP45"""
     err_loc = np.empty(x_computed.shape[0])

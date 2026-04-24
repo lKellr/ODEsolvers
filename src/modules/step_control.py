@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from csv import Error
 from typing import Any, Callable, Literal, NamedTuple, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -50,7 +49,7 @@ class StepController(ABC):
         self,
         atol: float | NDArray[np.floating],
         rtol: float | NDArray[np.floating],
-        norm: Callable[[NDArray[np.floating]], float],
+        norm: Callable[[NDArray[np.floating]], np.floating],
         safety_tol: float,  # is just a modifier for tolerance (after scaling by PI parameters)
     ):
         self.atol = atol
@@ -128,7 +127,7 @@ class StepControllerPI(StepController):
         control_params_rejected: ControllerPIParams,
         atol: float | NDArray[np.floating] = 10**-5,
         rtol: float | NDArray[np.floating] = 10**-3,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_tol: float = (
             0.9  # is just a modifier for tolerance (after scaling by PI parameters)
         ),
@@ -222,7 +221,7 @@ class StepControllerExtrap(StepController, ABC):
         self,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
@@ -308,7 +307,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         self,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
@@ -504,7 +503,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
         is_greedy: bool = True,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
@@ -638,7 +637,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         k_target: int,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
@@ -718,7 +717,7 @@ class StepControllerExtrapK(StepControllerExtrap):
         self,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
@@ -805,7 +804,7 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         self,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
-        norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
         safety_unscaled: float = (0.94),
         safety_tol: float = (0.65),
         s_limits_scaled: tuple[float, float] = (0.02, 4.0),
