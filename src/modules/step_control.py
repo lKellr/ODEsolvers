@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Literal, NamedTuple, override
+from typing import Callable, Literal, NamedTuple, override
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from modules.helpers import norm_hairer, clip
@@ -369,6 +369,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
             k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 1]
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
+            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratios_k[k_curr - 1]}")
         elif k_curr >= k_target - self.check_window[0] or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
@@ -378,7 +379,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
                 state = "continue"
             else:
                 state = "too_slow_convergence"
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
+            logger.debug(msg=f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     # @override
@@ -397,7 +398,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
     #     if k_curr >= k_target - self.check_window[0] - 1: # for NR variant, H&W step selection can use k_target - self.check_window[0]
     #         error_ratio = self._get_error_ratio(error, x_curr, x_pred)
     #         self.error_ratios_k[k_curr - k_target + self.check_window[0] + 1] = error_ratio # cache this as error computation is expensive
-    #         logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}")
+    #         logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}")
 
     #         if k_curr >= k_target - self.check_window[0]:
     #             if (
@@ -630,7 +631,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
 
 class StepControllerExtrapH(StepControllerExtrap):
     """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller.
-    Default check_window is (0, 0). By setting a lower check-window, the controller exits early without computing all orders up to k_target if convergene is not to be expected"""
+    Default check_window is (0, 0). By setting a lower check_window, the controller exits early without computing all orders up to k_target if convergence is not to be expected"""
 
     def __init__(
         self,
@@ -690,13 +691,18 @@ class StepControllerExtrapH(StepControllerExtrap):
             k_curr >= 2 and error_ratio >= self.error_ratio
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
+            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
         elif k_curr >= k_target - self.check_window[0] or allow_early_check:
-            if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
+            if k_curr >= k_target and error_ratio <= 1.0:  # Convergence only allolwed when target order has been reached
                 state = "accepted"
+            elif error_ratio < np.prod(
+                self.err_reduction_at_step[k_curr : k_target]
+            ):
+                state = "continue" # when check_window[0] has been set different from zero, this can trigger an early step restart if we can't expect convergence 
             else:
                 state = "too_slow_convergence"
+            logger.debug(msg=f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
         self.error_ratio = error_ratio
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     @override
@@ -711,7 +717,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         return next_ktarget, next_step_mult
 
 class StepControllerExtrapK(StepControllerExtrap):
-    """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance"""
+    """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance. A minimum order can be garanteed by setting a different check_window[0]}"""
 
     def __init__(
         self,
@@ -766,23 +772,29 @@ class StepControllerExtrapK(StepControllerExtrap):
 
         error_ratio: float = self._get_error_ratio(error, x_curr, x_pred)
 
-        if error_ratio <= 1.0:
-            state = "accepted"
-        elif error_ratio > np.prod(
-            self.err_reduction_at_step[k_curr : ]
-        ):  # Convergence monitor: can we expect convergence in later steps?
-            if k_curr < self.table_size - 1:
-                state = "continue"
-                logger.warning(
-                    f"Error tolerance will probably not be met until the end of the table. Continuing anyway."
-                )
-            else:
+        if (
+            k_curr >= 2 and error_ratio >= self.error_ratio
+        ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
+            state = "divergence"
+            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
+        elif k_curr >= k_target - self.check_window[0] or allow_early_check:
+            if error_ratio <= 1.0:
                 state = "accepted"
-                logger.critical(
-                    f"Error tolerance can't be met with the current step and table size. Continuing anyway."
-                )
-
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
+            elif error_ratio > np.prod(
+                self.err_reduction_at_step[k_curr : ]
+            ):  # Convergence monitor: can we expect convergence in later steps?
+                if k_curr < self.table_size - 1:
+                    state = "continue"
+                    logger.warning(
+                        f"Error tolerance will probably not be met until the end of the table. Continuing anyway."
+                    )
+                else:
+                    state = "accepted"
+                    logger.critical(
+                        f"Error tolerance can't be met with the current step and table size. Continuing anyway."
+                    )
+            logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}") # NOTE: this should be printed before the warnings
+        self.error_ratio = error_ratio
         return state
 
     @override
@@ -854,7 +866,7 @@ class StepControllerExtrapDummy(StepControllerExtrap):
             state = "accepted"
         else:
             state = "continue"
-        logger.debug(f"Evaluating step {k_curr}, error ratio: {error_ratio}, {state}")
+        logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
         return state
 
     @override
