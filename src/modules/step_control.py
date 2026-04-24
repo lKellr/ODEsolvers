@@ -496,18 +496,6 @@ class StepControllerExtrapKH(StepControllerExtrap):
             ):
                 next_ktarget = k_final
                 next_step_mult = s_last  # NOTE: Numerical recipes instead gives (probably an oversight, their implementation is different): s_b*self.total_feval_cost_for_k[iterator_table + 1]/self.total_feval_cost_for_k[iterator_table]
-        if self.is_retry:
-            # TODO: what if this is called in rejected step? this should not be used and is_retry should not be rejected -> move outside to calling function
-            # TODO: this limit will produce combinations that will not converge!
-            # TODO: this should be equal to !allow_order_increase
-            # next_ktarget = min(next_ktarget, k_curr)
-            next_ktarget = min(
-                next_ktarget, k_target
-            )  # NOTE: use the more conservstive version so its applicable to failed steps as well
-            next_step_mult = min(
-                1, next_step_mult
-            )  # next_step_mult has to be recomputed if next_ktarget is limited in line before -> difficult to implement i  calling function! (unless using allow_order_increase = False)
-            self.is_retry = False
         return next_ktarget, next_step_mult
 
 
@@ -663,7 +651,6 @@ class StepControllerExtrapH(StepControllerExtrap):
             step_multiplier_divergence,
             dtype,
         )
-        self.k_target = k_target
         self.error_ratio = np.nan
 
     def initialize_scheme(
@@ -698,7 +685,7 @@ class StepControllerExtrapH(StepControllerExtrap):
             k_curr >= 2 and error_ratio >= self.error_ratio
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
-        elif k_curr >= self.k_target - self.check_window[0] or allow_early_check:
+        elif k_curr >= k_target - self.check_window[0] or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
             else:
@@ -713,9 +700,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         k_final: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        assert k_final == self.k_target, "New parameters requested before all stages were completed"
-
-        next_ktarget = self.k_target 
+        next_ktarget = k_final 
         next_step_mult = self._get_step_mult_opt(self.error_ratio, k_final)
 
         return next_ktarget, next_step_mult
