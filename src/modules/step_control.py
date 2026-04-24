@@ -219,6 +219,7 @@ class StepControllerExtrap(StepController, ABC):
 
     def __init__(
         self,
+        pre_check_window: int,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
@@ -230,6 +231,7 @@ class StepControllerExtrap(StepController, ABC):
     ) -> None:
         super().__init__(atol, rtol, norm, safety_tol)
 
+        self.pre_check_window = pre_check_window
         self.safety_unscaled = safety_unscaled
         self.s_limits_scaled = s_limits_scaled
         self.step_multiplier_divergence = step_multiplier_divergence
@@ -242,13 +244,11 @@ class StepControllerExtrap(StepController, ABC):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int],
     ):
         self.is_symmetric = is_symmetric
         self.table_size = table_size
         self.err_reduction_at_step = err_reduction_at_step
         self.total_feval_cost_for_k = total_feval_cost_for_k
-        self.check_window = check_window
 
     def get_initial_ktarget(self) -> int:
         """very rough estimate from numerical recipes, can be motivated for example from Hairer&Wanner Fig.9.5"""
@@ -350,6 +350,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         work_order_limits: tuple[float, float] = (0.8, 0.9),
     ) -> None:
         super().__init__(
+            1,
             atol,
             rtol,
             norm,
@@ -371,10 +372,9 @@ class StepControllerExtrapKH(StepControllerExtrap):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int] = (1, 1),
     ):
         super().initialize_scheme(
-            is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
+            is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k
         )
         self.k_min = 1
         self.k_max: int = table_size - 1  # NOTE: Hairer & Wanner use table_size - 2
@@ -404,11 +404,11 @@ class StepControllerExtrapKH(StepControllerExtrap):
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
             logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratios_k[k_curr - 1]}")
-        elif k_curr >= k_target - self.check_window[0] or allow_early_check:
+        elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
             elif error_ratio < np.prod(
-                self.err_reduction_at_step[k_curr : k_target + self.check_window[1]]
+                self.err_reduction_at_step[k_curr : k_target + 1]
             ):  # Convergence monitor: can we expect convergence in until k_target + reduction_window?
                 state = "continue"
             else:
@@ -429,19 +429,19 @@ class StepControllerExtrapKH(StepControllerExtrap):
 
     #     state: contr_ext_state_type = "continue"
 
-    #     if k_curr >= k_target - self.check_window[0] - 1: # for NR variant, H&W step selection can use k_target - self.check_window[0]
+    #     if k_curr >= k_target - self.pre_check_window - 1: # for NR variant, H&W step selection can use k_target - self.pre_check_window
     #         error_ratio = self._get_error_ratio(error, x_curr, x_pred)
-    #         self.error_ratios_k[k_curr - k_target + self.check_window[0] + 1] = error_ratio # cache this as error computation is expensive
+    #         self.error_ratios_k[k_curr - k_target + self.pre_check_window + 1] = error_ratio # cache this as error computation is expensive
     #         logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}")
 
-    #         if k_curr >= k_target - self.check_window[0]:
+    #         if k_curr >= k_target - self.pre_check_window:
     #             if (
     #                 error_ratio <= 1.0
     #             ):  # a) Convergence in line k_target − 1; or  k_target
     #                 state = "accepted"
     #             elif error_ratio <= np.prod(
     #                 self.err_reduction_at_step[
-    #                     k_curr : k_target + self.check_window[1]
+    #                     k_curr : k_target + 1
     #                 ]
     #             ):  # Convergence monitor: can we expect convergence in until k_target + reduction_window?
     #                 state = "continue"
@@ -462,7 +462,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
             k_final >= self.k_min and k_final <= self.k_max
         ), "Values outside the allowed range should not be checked"
 
-        if k_final < k_target + self.check_window[1]:
+        if k_final <= k_target:
             s_decreased = self._get_step_mult_opt(
                 self.error_ratios_k[k_final - 2], k_final - 1
             )  # NOTE: unavailable in the first step (k=1)
@@ -665,7 +665,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
 
 class StepControllerExtrapH(StepControllerExtrap):
     """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller.
-    Default check_window is (0, 0). By setting a lower check_window, the controller exits early without computing all orders up to k_target if convergence is not to be expected"""
+    Default pre_check_window is 0. By setting a lower pre_check_window, the controller exits early without computing all orders up to k_target if convergence can not be expected"""
 
     def __init__(
         self,
@@ -680,6 +680,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+        0,
             atol,
             rtol,
             norm,
@@ -697,14 +698,12 @@ class StepControllerExtrapH(StepControllerExtrap):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int] = (0, 0),
     ):
         super().initialize_scheme(
             is_symmetric,
             table_size,
             err_reduction_at_step,
             total_feval_cost_for_k,
-            check_window=(0, 0),
         )
 
     def evaluate_step(
@@ -726,15 +725,15 @@ class StepControllerExtrapH(StepControllerExtrap):
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
             logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
-        elif k_curr >= k_target - self.check_window[0] or allow_early_check:
-            if k_curr >= k_target and error_ratio <= 1.0:  # Convergence only allolwed when target order has been reached
+        elif k_curr >= k_target - self.pre_check_window or allow_early_check:
+            if k_curr >= k_target and error_ratio <= 1.0:  # Convergence only allowed when target order has been reached
                 state = "accepted"
             elif error_ratio < np.prod(
                 self.err_reduction_at_step[k_curr : k_target]
             ):
-                state = "continue" # when check_window[0] has been set different from zero, this can trigger an early step restart if we can't expect convergence 
+                state = "continue"
             else:
-                state = "too_slow_convergence"
+                state = "too_slow_convergence" # when pre_check_window has been set different from zero, this can trigger an early step restart if we can't expect convergence 
             logger.debug(msg=f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
         self.error_ratio = error_ratio
         return state
@@ -751,7 +750,7 @@ class StepControllerExtrapH(StepControllerExtrap):
         return next_ktarget, next_step_mult
 
 class StepControllerExtrapK(StepControllerExtrap):
-    """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance. A minimum order can be garanteed by setting a different check_window[0]}"""
+    """Step size controller with constant step size for extrapolation methods. The order is adapted to fulfill the desired error tolerance. A minimum order can be garanteed by setting a different pre_check_window"""
 
     def __init__(
         self,
@@ -765,6 +764,7 @@ class StepControllerExtrapK(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+            np.iinfo(np.intp).max, # table_size - 1 would be sufficient
             atol,
             rtol,
             norm,
@@ -782,14 +782,12 @@ class StepControllerExtrapK(StepControllerExtrap):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int] = None,
     ):
         super().initialize_scheme(
             is_symmetric,
             table_size,
             err_reduction_at_step,
             total_feval_cost_for_k,
-            check_window=(self.table_size - 1, self.table_size - 1),
         )
 
     @override
@@ -811,7 +809,7 @@ class StepControllerExtrapK(StepControllerExtrap):
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
             logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
-        elif k_curr >= k_target - self.check_window[0] or allow_early_check:
+        elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if error_ratio <= 1.0:
                 state = "accepted"
             elif error_ratio > np.prod(
@@ -858,6 +856,7 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         dtype: DTypeLike = np.double,
     ) -> None:
         super().__init__(
+            0,
             atol,
             rtol,
             norm,
@@ -874,10 +873,9 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         table_size: int,
         err_reduction_at_step: NDArray[np.floating],
         total_feval_cost_for_k: NDArray[np.floating],
-        check_window: tuple[int, int] = (0, 0),
     ):
         super().initialize_scheme(
-            is_symmetric,table_size, err_reduction_at_step, total_feval_cost_for_k, check_window
+            is_symmetric,table_size, err_reduction_at_step, total_feval_cost_for_k
         )
 
     @override
