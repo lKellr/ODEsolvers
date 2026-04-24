@@ -504,7 +504,7 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
 
     def __init__(
         self,
-        is_greedy: bool,
+        is_greedy: bool = True,
         atol: float | NDArray[np.floating] = 10**-8,
         rtol: float | NDArray[np.floating] = 10**-5,
         norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
@@ -533,95 +533,105 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
         k_final: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        
+        # TODO: order increase
+
         assert (
             k_final >= self.k_min and k_final <= self.k_max
         ), "Values outside the allowed range should not be checked"
-
 
         allow_order_increase &= k_final + 1 <= self.k_max
 
-        work_opt = np.inf
-        s_opt = np.inf
-        k_opt = 0
-        for k_ in reversed(range(self.k_min, k_final + 1)):
-            s_ = self._get_step_mult_opt(self.error_ratios_k[k_ - 1], k_)
-            w_ = self.total_feval_cost_for_k / s_ # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
+            work_opt = np.inf
+            s_opt = np.inf
+            k_opt = 0
+            for k_ in reversed(
+                range(self.k_min, k_final + 1)
+            ):  # for NR version: range(k_final-1, ...)
+                # for H&W version: range(k_target - self.check_window[0], ...)
+                s_ = self._get_step_mult_opt(self.error_ratios_k[k_ - 1], k_)
+                w_ = (
+                    self.total_feval_cost_for_k / s_
+                )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
 
-            if (
-                w_ < self.work_order_limits[0] * work_opt
-            ):  # NOTE: threshold favors keeping the order constant (high)
-                k_opt = k_
-                work_opt = w_
-                s_opt = s_
-        if allow_order_increase and :
-            work_opt = (
-                work_k[-2] * (1 + 1 / self.work_order_limits[1]) - work_k[-3]
-            )  # TODO: this estimate is not symmetric; i can probably find a better (quadratic?) estimate
-            s_opt = (
-                s_?
-                * self.total_feval_cost_for_k[k_final + 1]
-                / self.total_feval_cost_for_k[k_final]
-            )
-            k_opt = k_final + 1
+                if (allow_order_increase and k_ == k_final-1): # Interjection by additional check once the two required work/step quantities are available
+                    # TODO: these two variants are not necessary
+                    if self.is_greedy:
+                        if (work_opt < self.work_order_limits[1] * w_):
+                            k_opt = k_final + 1
+                            s_opt = s_opt * self.total_feval_cost_for_k[k_final + 1]/ self.total_feval_cost_for_k[k_final]
+                            break
+                    else:
+                        work_inc = work_opt * (1. + 1./self.work_order_limits[1]) - w_
+                        if work_inc < work_opt:
+                            k_opt = k_final + 1
+                            work_opt = work_inc
+                            s_opt = s_opt * self.total_feval_cost_for_k[k_final + 1]/ self.total_feval_cost_for_k[k_final]
 
+
+                if (
+                    w_ < self.work_order_limits[0] * work_opt
+                ):  # NOTE: threshold favors keeping the order constant (high)
+                    k_opt = k_
+                    work_opt = w_
+                    s_opt = s_
+                elif self.is_greedy:
+                    break
         return k_opt, s_opt
 
-    def get_most_efficient_params_fullred_greedy(
-        self,
-        k_final: int,
-        allow_order_increase: bool,
-    ) -> tuple[int, float]:
-        assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
+    # def get_most_efficient_params_fullred_greedy(
+    #     self,
+    #     k_final: int,
+    #     allow_order_increase: bool,
+    # ) -> tuple[int, float]:
+    #     assert (
+    #         k_final >= self.k_min and k_final <= self.k_max
+    #     ), "Values outside the allowed range should not be checked"
 
+    #     s_decreased = self._get_step_mult_opt(
+    #         self.error_ratios_k[k_final - 2], k_final - 1
+    #     )  # NOTE: unavailable in the first step (k=1)
+    #     s_check = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
 
-        s_decreased = self._get_step_mult_opt(
-            self.error_ratios_k[k_final - 2], k_final - 1
-        )  # NOTE: unavailable in the first step (k=1)
-        s_check = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
+    #     work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
+    #     work_target = (
+    #         self.total_feval_cost_for_k[k_final] / s_check
+    #     )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
 
-        work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
-        work_target = (
-            self.total_feval_cost_for_k[k_final] / s_check
-        )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
+    #     # check for possible order increase
+    #     if (
+    #         work_target < self.work_order_limits[1] * work_decreased
+    #         and allow_order_increase
+    #         and k_final + 1 <= self.k_max
+    #     ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. We have assumed work_increased = work_check to find s_increased. so work_increased can not be computed from s_increased to perform the check
+    #         next_ktarget = (
+    #             k_final + 1
+    #         )  # order increase / target constant (start of window)
+    #         next_step_mult = (
+    #             s_check
+    #             * self.total_feval_cost_for_k[k_final + 1]
+    #             / self.total_feval_cost_for_k[k_final]
+    #         )
+    #     else:  # decrease k_check until optimum has been found, iteration works if there is just a single minimum, toherwise all work_k have to be computed and the minimum selected
+    #         while work_decreased < self.work_order_limits[0] * work_target: # NOTE: threshold favors keeping the order constant
+    #             k_final -= 1
+    #             if (
+    #                 k_final - 1
+    #                 < self.k_min  # NOTE: selecting different limits here will cause this to behave like the H&W/NR versions
+    #                 # k_final - 1 < k_target - self.check_window[0] # H&W version
+    #                 # k_final - 1 < k_final_initial - 1 # NR version
+    #             ):
+    #                 break  # early exit to prevent the computation of the multiplier/access of error_ratio of k_min-1
 
-        # check for possible order increase
-        if (
-            work_target < self.work_order_limits[1] * work_decreased
-            and allow_order_increase
-            and k_final + 1 <= self.k_max
-        ):  # NOTE: this work check is "out of phase" with the increase, since the work for order increase is unknown. We have assumed work_increased = work_check to find s_increased. so work_increased can not be computed from s_increased to perform the check
-            next_ktarget = (
-                k_final + 1
-            )  # order increase / target constant (start of window)
-            next_step_mult = (
-                s_check
-                * self.total_feval_cost_for_k[k_final + 1]
-                / self.total_feval_cost_for_k[k_final]
-            )
-        else:  # decrease k_check until optimum has been found, iteration works if there is just a single minimum, toherwise all work_k have to be computed and the minimum selected
-            while work_decreased < self.work_order_limits[0] * work_target: # NOTE: threshold favors keeping the order constant
-                k_final -= 1
-                if (
-                    k_final - 1
-                    < self.k_min  # NOTE: selecting different limits here will cause this to behave like the H&W/NR versions
-                    # k_check - 1 < k_target - self.check_window[0] # H&W version
-                    # k_iter - 1 < k_check - 1 # NR version
-                ):
-                    break  # early exit to prevent the computation of the multiplier/access of error_ratio of k_min-1
+    #             s_check = s_decreased
+    #             s_decreased = self._get_step_mult_opt(
+    #                 self.error_ratios_k[k_final - 2], k_final - 1
+    #             )  # NOTE: if k_final=1, this will not exist
+    #             work_target = work_decreased
+    #             work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
+    #         next_ktarget = k_final
+    #         next_step_mult = s_check
+    #     return next_ktarget, next_step_mult
 
-                s_check = s_decreased
-                s_decreased = self._get_step_mult_opt(
-                    self.error_ratios_k[k_final - 2], k_final - 1
-                )  # NOTE: if k_check=1, this will not exist
-                work_target = work_decreased
-                work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
-            next_ktarget = k_final
-            next_step_mult = s_check
-        return next_ktarget, next_step_mult
-    
 class StepControllerExtrapH(StepControllerExtrap):
     """Step size controller with constant order for extrapolation methods. Step size is controlled by an unsophisticated I-controller.
     Default check_window is (0, 0). By setting a lower check-window, the controller exits early without computing all orders up to k_target if convergene is not to be expected"""
