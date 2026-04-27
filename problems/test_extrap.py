@@ -22,7 +22,7 @@ logger_pil.setLevel(logging.INFO)
 cmap = plt.get_cmap("tab20")
 
 
-x_dot = lambda t, x: np.array(
+x_dot: Callable[[float, NDArray[floating]], NDArray[floating]] = lambda t, x: np.array(
     [
         2 * t * x[0] * np.log(np.maximum(x[1], 1e-3)),
         -2 * t * x[1] * np.log(np.maximum(x[0], 1e-3)),
@@ -32,7 +32,9 @@ x_dot = lambda t, x: np.array(
 t_max = 5.0
 x0 = np.array([1.0, np.e])
 
-x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
+x_analytic: Callable[[float], NDArray[floating]] = lambda t: np.array(
+    [np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]
+).T
 
 
 results = dict()
@@ -61,10 +63,10 @@ h_average = t_max / len(
 # )
 # results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
 
-solver_eulex_step = EulerExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
-)
-results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
+# solver_eulex_step = EulerExtrapolation(
+#     x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
+# )
+# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
 
 solver_eulex_ord = EulerExtrapolation(
     x_dot,

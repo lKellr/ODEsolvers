@@ -14,6 +14,7 @@
 - handle retries in Extrap or controller?
 - create select k*, h from retry, divergence, fail
 - where to handle divergence?
+- step shortening (at end) handled by controller
 
 ## Tests
 - test implicit extrapolation schemes

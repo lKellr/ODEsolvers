@@ -143,7 +143,6 @@ class ExtrapolationSolver(ABC):
 
         if step_controller is None:
             step_controller = StepControllerExtrapKH(
-                is_symmetric=is_symmetric
                 dtype=dtype,
             )
         self.step_controller = step_controller
@@ -197,7 +196,10 @@ class ExtrapolationSolver(ABC):
         )  # NOTE: first entry is never used
 
         self.step_controller.initialize_scheme(
-            self.table_size, err_reduction_at_step, total_feval_cost_for_k
+            self.is_symmetric,
+            self.table_size,
+            err_reduction_at_step,
+            total_feval_cost_for_k,
         )
 
     def fill_extrapolation_table(
@@ -232,8 +234,8 @@ class ExtrapolationSolver(ABC):
         x_curr: NDArray[np.floating],
         k_target: int,
         step_size: float,
-        allow_full_order_variation: bool = False,
-    ) -> tuple[NDArray[np.floating], bool, int, dict[str, Any]]:
+        allow_early_check: bool = False,
+    ) -> tuple[NDArray[np.floating], contr_ext_state_type, int, dict[str, Any]]:
         """Performs an extrapolation step of x0 until t + step_size"""
         error: NDArray[np.floating] = np.empty_like(x_curr)
 
@@ -263,9 +265,7 @@ class ExtrapolationSolver(ABC):
             jac0=jac0,
         )
 
-        state: contr_ext_state_type = (
-            "continue" if not is_diverging else "divergence"
-        ) # TODO: retry flag is not set if i diverge here
+        state: contr_ext_state_type = "continue" if not is_diverging else "divergence"
         k_curr = 0
         while state == "continue":
             k_curr += 1
@@ -280,7 +280,6 @@ class ExtrapolationSolver(ABC):
             if(is_diverging): # early exit: we don't have to calculate the next result and check the error if we are already diverging
                 logger.debug(f"Early exit in stage {k_curr} due to divergence in the solver")
                 state = "divergence"
-                self.step_controller.is_retry = True # TODO: i should move this flag out of the controller
                 break
 
             last_table_diag= T_table_k[k_curr-1] # needs to be cached for error computation
@@ -296,9 +295,7 @@ class ExtrapolationSolver(ABC):
 
             # exit conditions
             state = self.step_controller.evaluate_step(
-                error,
-                k_curr,
-                k_target,
+                error, x_curr, T_table_k[k_curr], k_curr, k_target, allow_early_check
             )
 
         step_info["stop_reason"] = state
@@ -310,9 +307,16 @@ class ExtrapolationSolver(ABC):
         step_info["local_error"] = error
         step_info["local_order"] = (k_curr + (not is_diverging))*self.order_exponent
         step_info["max_substeps"] = self.substep_seq[k_curr]
+
+        logger.debug(
+            "Finished step\n"
+            + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
+            + "\n"
+        )
+
         return (
             T_table_k[k_curr],
-            state == "accepted",
+            state,
             k_curr,
             step_info,
         )
@@ -353,41 +357,43 @@ class ExtrapolationSolver(ABC):
 
         assert step > 0, f"invalid initial step size {step}"
         assert (
-            k_target >= 1 and k_target <= self.table_size - 1
-        ), f"invalid initial target order {k_target}"  # TODO: which window is valid?
+            k_target >= self.step_controller.k_min
+            and k_target <= self.step_controller.k_max
+        ), f"invalid initial target order {k_target}"
 
         logger.debug(f"Beginning solve.")
 
         time = [t0]
         solution = [x0.astype(self.dtype)]
 
-        is_retry = False
-        allow_full_order_variation = True  # allow quick order variation for first and last steps when target order is not optimal
+        allow_early_check = True  # allow quick order variation for first and last steps when target order is not optimal
         current_time = t0
         while current_time < t_max:
             if (
                 current_time + step > t_max
-            ):  # shorten h if we would go further than necessary
+            ):  # shorten h if we would go further than necessary # TODO: this is inefficients since order selection is suboptimal
                 step = t_max - current_time
-                allow_full_order_variation = True
+                allow_early_check = True
 
             logger.debug(
                 f"Starting step at time {current_time:.3f} of {t_max} with k_target = {k_target}, h = {step:.2E}"
             )
 
             # do step
-            new_solution, accepted, k_final, step_info = (
-                extrapolation_step(
-                    current_time,
-                    solution[-1],
-                    k_target if not allow_full_order_variation else self.table_size - 1,
-                    step,
-                    allow_full_order_variation,
-                )
+            new_solution, state, k_final, step_info = self.extrapolation_step(
+                current_time,
+                solution[-1],
+                k_target,
+                step,
+                allow_early_check,
             )
-            # reset full order variation for the first step
-            if allow_full_order_variation:
-                allow_full_order_variation = False
+            # reset full order variation
+            if allow_early_check:
+                allow_early_check = False
+            if (
+                state == "divergence"
+            ):  # smaller step sizes might lead to earlier convergence, therefore we should check earlier
+                allow_early_check = True
 
             # update info
             solve_info["n_feval"] += step_info["n_feval"]
@@ -395,7 +401,7 @@ class ExtrapolationSolver(ABC):
             solve_info["n_lu"] += step_info["n_lu"]
 
             # check for acceptance
-            if accepted:
+            if state == "accepted":
                 # save solution
                 current_time += step
                 solution.append(new_solution)
@@ -404,45 +410,15 @@ class ExtrapolationSolver(ABC):
                     self.step_controller.norm(step_info["local_error"])
                 )
                 solve_info["local_orders"].append(step_info["local_order"])
-
-                # find ideal parameters for the next step
-                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, not is_retry) # TODO: different allow_order increase than failed
-                if is_retry: # TODO: maybe all of this should be handled in the step controller? (accepted/retry/rejected/divergence)
-                    step *= min(1, next_step_mult)
-                    is_retry = False
-                else:
-                    step *= next_step_mult
-
-                logger.debug(
-                    "Finished step\n"
-                    + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
-                    + "\n"
-                )
-
+                logger.debug("Accepted step, continuing.")
             else:
                 solve_info["n_restarts"] += 1
-                # TODO: i might have to include this into extrapolation_step or return the state
-                # TODO: slow convergence
-                k_target, next_step_mult = self.step_controller.get_most_efficient_parameters(k_final, k_target, False) # TODO: different alow_order increase than retry
-                is_retry = True
-                logger.debug(f"Slowly converging step, retrying"
-                                                 + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
-                    + "\n"
-                )
+                logger.debug("Rejected step, restarting.")
+            # finding parameters for the next step
+            k_target, step = self.step_controller.get_next_step_parameters(
+                k_final, k_target, state
+            )
 
-
-                # TODO: divergence
-                k_target = max(
-                    k_final, self.step_controller.k_min
-                )  # make sure that we start at least from k_min, even if the divergence happened early
-                step *= self.step_controller.step_multiplier_divergence # keep k but reduce the step size
-                is_retry = True # this keeps the step size from increasing too much
-                allow_full_order_variation = True # smaller step sizes might lead to earlier convergence, therefore we should check earlier
-                logger.debug(f"Divergent step, retrying with shorter step"
-                                                 + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
-                    + "\n"
-                )
-                
         # finished
         logger.debug(
             "Finished\n"
