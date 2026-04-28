@@ -33,7 +33,7 @@ time, result, solve_info = DP45(
     rtol=1e-6,
 )
 
-# fig, ax = plt.subplots()
-# # ax.plot(result[0], result[1])
-# ax.plot(time, result[:, 0], marker="o")
-# plt.show()
+fig, ax = plt.subplots()
+# ax.plot(result[0], result[1])
+ax.plot(time, result[:, 0], marker="o")
+plt.show()

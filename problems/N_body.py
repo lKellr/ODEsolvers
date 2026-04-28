@@ -41,8 +41,8 @@ def x_dot(t, x):
     return np.hstack((velocities, forces))
 
 
-t_max = 1.0
-# TODO: use astropy ephemerides, currently i am starting with all planets in phase (on the x-axis)
+t_max = 100.0
+# TODO: use astropy ephemerides, currently i am starting with all planets in phase (on the x-axis), these orbits are unstable
 initial_positions = np.array(
     [
         [0.0, 0.0],
@@ -73,28 +73,23 @@ x0 = np.hstack([initial_positions.flatten(), masses2 * initial_velocities.flatte
 
 assert x0.size == (2 * n * dim), f"Wrong shape {x0.shape} of initial condition"
 
+# EULEX
 prof_tim_start = perf_counter()
 solver_eulex = EulerExtrapolation(
-    x_dot, table_size=12, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+    x_dot, table_size=12, step_controller=StepControllerExtrapKH(atol=1e-6, rtol=1e-4)
 )
 time, result, solve_info = solver_eulex.solve(x0, t_max)
 
-# time, result, solve_info = DP45(
-#     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
-# )
-# time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
 prof_elapsed = perf_counter() - prof_tim_start
 print(f"solution took {prof_elapsed:.3f} s for EULEX")
 
-prof_tim_start = perf_counter()
-time, result, solve_info = DP45(
-    x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
-)
-time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
-prof_elapsed = perf_counter() - prof_tim_start
-print(
-    f"solution took {prof_elapsed:.3f} s for DP45"
-)  # 5.4s with numba njit, 20.2 s without
+# # DP45
+# prof_tim_start = perf_counter()
+# time, result, solve_info = DP45(
+#     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
+# )
+# prof_elapsed = perf_counter() - prof_tim_start
+# print(f"solution took {prof_elapsed:.3f} s for DP45")
 
 fig, ax = plt.subplots(figsize=(16, 6), layout="tight")
 fig.set_tight_layout(True)

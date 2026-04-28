@@ -121,6 +121,17 @@ def DP45(
     info["n_feval"] = 1 + (len(t) - 1 + len(t_crit)) * 6
     info["n_restarts"] = len(t_crit)
     info["restarts"] = (t_crit, x_crit)
+    print(
+        "Finished\n"
+        + "\n".join(
+            [
+                f"{k}: {v}"
+                for k, v in info.items()
+                if not isinstance(v, list) and not isinstance(v, tuple)
+            ]
+        )
+        + "\n"
+    )
     return np.array(t), np.array(x), info
 
 

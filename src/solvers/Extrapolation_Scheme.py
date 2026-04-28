@@ -240,7 +240,7 @@ class ExtrapolationSolver(ABC):
         error: NDArray[np.floating] = np.empty_like(x_curr)
 
         step_info: dict[str, Any] = dict(
-            stop_reason = "continue",
+            stop_reason="continue",
             n_feval=0,
             n_jaceval=0,
             n_lu=0,
@@ -277,7 +277,9 @@ class ExtrapolationSolver(ABC):
                 n_steps=self.substep_seq[k_curr],
                 jac0=jac0,
             )
-            if(is_diverging): # early exit: we don't have to calculate the next result and check the error if we are already diverging
+            if (
+                is_diverging
+            ):  # early exit: we don't have to calculate the next result and check the error if we are already diverging
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
                         f"Early exit in stage {k_curr} due to divergence in the solver"
@@ -288,7 +290,7 @@ class ExtrapolationSolver(ABC):
             # last_table_diag= T_table_k[k_curr-1] # needs to be cached for advanced error computation
             self.fill_extrapolation_table(T_fine_base_order, T_table_k, k_curr)
 
-            error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
+            error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr])  # subdiagonal
             # error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
             # error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.step_controller.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
 
@@ -307,7 +309,7 @@ class ExtrapolationSolver(ABC):
         )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.impl_base_scheme
         step_info["local_error"] = error
-        step_info["local_order"] = (k_curr + (not is_diverging))*self.order_exponent
+        step_info["local_order"] = (k_curr + (not is_diverging)) * self.order_exponent
         step_info["max_substeps"] = self.substep_seq[k_curr]
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -367,7 +369,7 @@ class ExtrapolationSolver(ABC):
         ), f"invalid initial target order {k_target}"
 
         if log_period is None:
-            log_period = step / (t_max - t0) * 20
+            log_period = step / (t_max - t0) * 50
 
         logger.info(f"Beginning solve.")
 
@@ -895,14 +897,18 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             t_n += delta_t
 
             if n == 0:
-                delta_x_0 = delta_x # cache for stability check
-            elif (n == 1):  # stability check
-                theta = lu_solve( # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
+                delta_x_0 = delta_x  # cache for stability check
+            elif n == 1:  # stability check
+                theta = (
+                    lu_solve(  # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
                         lu_and_piv,
-                        b=rhs - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                        b=rhs
+                        - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
                         overwrite_b=True,
                         check_finite=False,
-                    ) / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                    )
+                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                )
                 if self.norm(theta) > 1.0:
                     return x_n, True
             # delta_x_prev = delta_x
@@ -1004,9 +1010,11 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             x_n += delta_x
             t_n += delta_t
 
-            if (n == 1): # stability check
-                theta = 0.5 * (delta_x - delta_x_0) / delta_x_0 # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
-                if self.norm(theta) > 1.0:  
+            if n == 1:  # stability check
+                theta = (
+                    0.5 * (delta_x - delta_x_0) / delta_x_0
+                )  # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
+                if self.norm(theta) > 1.0:
                     return x_n, True
 
         if (
