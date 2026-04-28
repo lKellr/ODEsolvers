@@ -6,5 +6,9 @@ All methods return function, Jacobian and LU computation/evaluation frequencies 
 # Examples
 ## work-precision graphs
 ![work-precision-explicit](work_precision.png)
+
 ## N-body simulation
 ![N-body](N-body.gif)
+
+## Convergence of extrapolation schemes of increasing order
+![convergence](convergence.png)

@@ -28,6 +28,7 @@ def DP45(
         n_jaceval=0,
         n_lu=0,
         n_restarts=0,
+        local_errors=[],
     )
     if "control_params" not in step_controller_kwargs.keys():
         step_controller_kwargs["control_params"] = get_default_PI_parameters(4)
@@ -113,6 +114,7 @@ def DP45(
             x.append(x_pred)
             k1 = k2
             ix_step += 1
+            info["local_errors"].append(step_controller.norm(err))
         else:
             t_crit.append(t_pred)
             x_crit.append(x_pred)

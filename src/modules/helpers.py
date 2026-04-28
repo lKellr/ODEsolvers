@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root
 
-norm_hairer: Callable[[NDArray[np.floating]], float] = (
+norm_hairer: Callable[[NDArray[np.floating]], np.floating] = (
     lambda x: (np.sum(x**2) / x.size) ** 0.5
 )
 
@@ -47,7 +47,7 @@ def numerical_jacobian_t(
     f: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     delta: float,
 ) -> NDArray[np.floating]:
-    jac = np.empty((x.shape[0], x.shape[0]))
+    jac = np.empty((x.shape[0], x.shape[0]), dtype=x.dtype)
     f_x = f(t, x)
     for j in range(x.shape[0]):
         shift = np.zeros_like(x)

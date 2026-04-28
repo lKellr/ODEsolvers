@@ -60,7 +60,7 @@ def Newton(
     tol_iter: float,
     max_iter: int = 20,
     jac_freq: int = 5,
-    norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+    norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
     **kwargs,
 ) -> tuple[NDArray[np.floating], bool, dict[str, Any]]:
     success = True
@@ -127,7 +127,7 @@ def NewtonODE(
     eta_old: float,
     max_iter: int = 20,
     jac_freq: int = 100,
-    norm: Callable[[NDArray[np.floating]], float] = norm_hairer,
+    norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
 ) -> tuple[NDArray[np.floating], bool, dict[str, Any]]:
     """Version of Newtons method with stopping criteria adapted to ODE solvers"""
 

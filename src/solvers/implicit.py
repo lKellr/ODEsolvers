@@ -452,13 +452,13 @@ def RADAU5(
             delta_Z = lu_solve((lu, piv), rhs, overwrite_b=True, check_finite=False)
             Z += delta_Ts
 
-        # TODO:
+        # TODO: implement this method properly
         raise NotImplementedError()
 
         # update
         x[i + 1] = x[i] + z_3  # eq 8.2b
 
-        info["n_feval"] += 3  # TODO: cehck
+        info["n_feval"] += 3  # TODO: check
         # info["n_jaceval"] += sol.njev # TODO:
         # info["n_lu"] += sol.nfev
     return t, x, info
