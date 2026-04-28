@@ -1,13 +1,15 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
+from modules.step_control import StepControllerExtrapKH
 from solvers.embedded import DP45
 from solvers.explicit import *
+from solvers.Extrapolation_Scheme import *
 import logging
 from numba import njit
 from time import perf_counter
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 logger_nb = logging.getLogger("numba")
@@ -72,13 +74,27 @@ x0 = np.hstack([initial_positions.flatten(), masses2 * initial_velocities.flatte
 assert x0.size == (2 * n * dim), f"Wrong shape {x0.shape} of initial condition"
 
 prof_tim_start = perf_counter()
+solver_eulex = EulerExtrapolation(
+    x_dot, table_size=12, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+)
+time, result, solve_info = solver_eulex.solve(x0, t_max)
+
+# time, result, solve_info = DP45(
+#     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
+# )
+# time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
+prof_elapsed = perf_counter() - prof_tim_start
+print(f"solution took {prof_elapsed:.3f} s for EULEX")
+
+prof_tim_start = perf_counter()
 time, result, solve_info = DP45(
     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
 )
-# time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
+time, result, solve_info = Euler(x_dot, x0, t_max, h=1e-3)
 prof_elapsed = perf_counter() - prof_tim_start
-print(f"solution took {prof_elapsed:.3f} s")  # 5.4s with numba njit, 20.2 s without
-
+print(
+    f"solution took {prof_elapsed:.3f} s for DP45"
+)  # 5.4s with numba njit, 20.2 s without
 
 fig, ax = plt.subplots(figsize=(16, 6), layout="tight")
 fig.set_tight_layout(True)

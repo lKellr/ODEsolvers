@@ -174,10 +174,11 @@ class StepControllerPI(StepController):
 
         step_fac: float
         if accepted:
-            logger.debug(
-                msg=f"Accepting step"
-                + (" with retry correction" if self.is_retry else "")
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Accepting step"
+                    + (" with retry correction" if self.is_retry else "")
+                )
             step_fac = get_step_PI(
                 err_ratio, self.err_ratio_prev, self.control_params_accepted
             )
@@ -190,9 +191,10 @@ class StepControllerPI(StepController):
                 tried_step_size * step_fac
             )  # NOTE: without deadzone and clipping, this should not be problematic since we use it just for improving rejected estimates
         else:
-            logger.debug(
-                msg=f"Rejecting step with error {err_ratio}, h = {tried_step_size}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Rejecting step with error {err_ratio}, h = {tried_step_size}"
+                )
             step_fac = get_step_PI(
                 err_ratio, self.err_ratio_prev, self.control_params_rejected
             )
@@ -260,13 +262,13 @@ class StepControllerExtrap(StepController, ABC):
             log_fact = -max(-12.0, np.log10(self.rtol)) * 0.6 + 0.5
         else:
             log_fact = -np.log10(self.rtol + self.atol) * 0.6 + 0.5
-        k_target = max(1, min(self.table_size - 1, int(log_fact)))
+        k_target = max(self.k_min, min(self.k_max, int(log_fact)))
         return k_target
 
     def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
         """returns the optimal factor by which the step should be multiplied to reach the prescribed tolerance levels"""
         order_exponent = (
-            1 / (2 * next_k + 1) if self.is_symmetric else next_k + 1  #
+            1.0 / (2 * next_k + 1) if self.is_symmetric else 1.0 / (next_k + 1)  #
         )  # NOTE: 2*k+1 since k starts at zero. Hairer&Wanner use 2*k-1 for k starting with 1
         temp_s_limit_descaled = self.s_limits_scaled[0] ** order_exponent
 
@@ -325,8 +327,8 @@ class StepControllerExtrap(StepController, ABC):
                 self.is_retry = True
             case "divergence":
                 k_target = max(
-                    k_final, self.k_min
-                )  # make sure that we start at least from k_min, even if the divergence happened early
+                    k_target_last, self.k_min
+                )  # make sure that we start at least from k_min, even if the divergence happened early; NOTE: do not limit to k_final, else step size is too large to converge until k_target_next
                 next_step_mult = (
                     self.step_multiplier_divergence
                 )  # keep k but reduce the step size
@@ -384,6 +386,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
         super().initialize_scheme(
             is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k
         )
+        self.k_min = 2
         self.k_max = table_size - 1  # NOTE: Hairer & Wanner use table_size - 2
 
         self.error_ratios_k = np.empty((table_size - 1,), self.dtype)
@@ -407,10 +410,13 @@ class StepControllerExtrapKH(StepControllerExtrap):
         )
 
         if (
-            k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 1]
+            k_curr >= 2 and error_ratio >= self.error_ratios_k[k_curr - 2]
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
-            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratios_k[k_curr - 1]}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratios_k[k_curr - 1]}"
+                )
         elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target
                 state = "accepted"
@@ -420,7 +426,10 @@ class StepControllerExtrapKH(StepControllerExtrap):
                 state = "continue"
             else:
                 state = "too_slow_convergence"
-            logger.debug(msg=f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Evaluated stage {k_curr}, error ratio: {error_ratio}, {state}"
+                )
         return state
 
     @override
@@ -430,17 +439,30 @@ class StepControllerExtrapKH(StepControllerExtrap):
         k_target: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
+        assert (
+            k_final >= 1 and k_final <= self.table_size - 1
+        ), f"k_final = {k_final} outside of bounds"
+
         next_ktarget = -1
         next_step_mult = -1.0
 
-        assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
+        if k_final < self.k_min:
+            assert (
+                k_final == self.k_min - 1
+            ), "Step exited long before k_min. Estimation of next step parameters is not possible."
+            next_ktarget = self.k_min
+            next_step_mult = (
+                self._get_step_mult_opt(
+                    self.error_ratios_k[self.k_min - 2], self.k_min - 1
+                )
+                * self.total_feval_cost_for_k[self.k_min]
+                / self.total_feval_cost_for_k[self.k_min - 1]
+            )
 
-        if k_final <= k_target:
+        elif k_final <= k_target:
             s_decreased = self._get_step_mult_opt(
                 self.error_ratios_k[k_final - 2], k_final - 1
-            )  # NOTE: unavailable in the first step (k=1)
+            )
             s_same = self._get_step_mult_opt(self.error_ratios_k[k_final - 1], k_final)
 
             work_decreased = self.total_feval_cost_for_k[k_final - 1] / s_decreased
@@ -545,8 +567,8 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
         allow_order_increase: bool,
     ) -> tuple[int, float]:
         assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
+            k_final >= 1 and k_final <= self.table_size - 1
+        ), f"k_final = {k_final} outside of bounds"
 
         allow_order_increase &= k_final + 1 <= self.k_max
 
@@ -601,10 +623,6 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
     #     k_final: int,
     #     allow_order_increase: bool,
     # ) -> tuple[int, float]:
-    #     assert (
-    #         k_final >= self.k_min and k_final <= self.k_max
-    #     ), "Values outside the allowed range should not be checked"
-
     #     s_decreased = self._get_step_mult_opt(
     #         self.error_ratios_k[k_final - 2], k_final - 1
     #     )  # NOTE: unavailable in the first step (k=1)
@@ -709,10 +727,16 @@ class StepControllerExtrapH(StepControllerExtrap):
         error_ratio = self._get_error_ratio(error, x_curr, x_pred)
 
         if (
-            k_curr >= 2 and error_ratio >= self.error_ratio
+            k_curr >= 2
+            and error_ratio >= self.error_ratio
+            and error_ratio
+            > 1.0  # NOTE: last check is to prevent triggering due to numerical precision
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
-            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous error ratio: {self.error_ratio}"
+                )
         elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if k_curr >= k_target and error_ratio <= 1.0:  # Convergence only allowed when target order has been reached
                 state = "accepted"
@@ -722,7 +746,10 @@ class StepControllerExtrapH(StepControllerExtrap):
                 state = "continue"
             else:
                 state = "too_slow_convergence" # when pre_check_window has been set different from zero, this can trigger an early step restart if we can't expect convergence 
-            logger.debug(msg=f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Evaluated stage {k_curr}, error ratio: {error_ratio}, {state}"
+                )
         self.error_ratio = error_ratio
         return state
 
@@ -733,8 +760,8 @@ class StepControllerExtrapH(StepControllerExtrap):
         k_target: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        next_ktarget = k_final 
-        next_step_mult = self._get_step_mult_opt(self.error_ratio, k_final)
+        next_ktarget = k_target
+        next_step_mult = self._get_step_mult_opt(self.error_ratio, k_target)
 
         return next_ktarget, next_step_mult
 
@@ -782,6 +809,7 @@ class StepControllerExtrapK(StepControllerExtrap):
             err_reduction_at_step,
             total_feval_cost_for_k,
         )
+        self.k_min = 1
 
     @override
     def evaluate_step(
@@ -801,7 +829,10 @@ class StepControllerExtrapK(StepControllerExtrap):
             k_curr >= 2 and error_ratio >= self.error_ratio
         ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
             state = "divergence"
-            logger.debug(msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratio}"
+                )
         elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if error_ratio <= 1.0:
                 state = "accepted"
@@ -818,7 +849,10 @@ class StepControllerExtrapK(StepControllerExtrap):
                     logger.critical(
                         f"Error tolerance can't be met with the current step and table size. Continuing anyway."
                     )
-            logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}") # NOTE: this should be printed before the warnings
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Evaluated stage {k_curr}, error ratio: {error_ratio}, {state}"
+                )  # NOTE: this should be printed before the warnings
         self.error_ratio = error_ratio
         return state
 
@@ -829,10 +863,6 @@ class StepControllerExtrapK(StepControllerExtrap):
         k_target: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
-
         next_step_mult = 1.0
         next_ktarget = self.table_size-1
 
@@ -896,7 +926,10 @@ class StepControllerExtrapDummy(StepControllerExtrap):
             state = "accepted"
         else:
             state = "continue"
-        logger.debug(f"Evaluated step {k_curr}, error ratio: {error_ratio}, {state}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Evaluated stage {k_curr}, error ratio: {error_ratio}, {state}"
+            )
         return state
 
     @override
@@ -906,9 +939,6 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         k_target: int,
         allow_order_increase: bool,
     ) -> tuple[int, float]:
-        assert (
-            k_final >= self.k_min and k_final <= self.k_max
-        ), "Values outside the allowed range should not be checked"
         assert (
             k_final == k_target
         ), f"Step was finished with k_final = {k_final} not equal to k_tagret = {k_target}. This should not occur with this controller."

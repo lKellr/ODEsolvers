@@ -7,13 +7,15 @@ from modules.step_control import (
     StepControllerExtrapK,
     StepControllerExtrapH,
     StepControllerExtrapKH,
+    StepControllerExtrapKH_Deuflhard,
 )
 from solvers.embedded import *
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+
+logging.basicConfig(level=logging.INFO)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 logger_pil = logging.getLogger("PIL")
@@ -50,10 +52,19 @@ h_average = t_max / len(
     results["DP45"][0]
 )  # use the same number of steps as the adaptive scheme
 
-# solver_eulex = EulerExtrapolation(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+solver_eulex = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+)
+results["EULEX"] = solver_eulex.solve(x0, t_max)
+
+# solver_eulex_de = EulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     step_controller=StepControllerExtrapKH_Deuflhard(
+#         atol=1e-7, rtol=1e-5, is_greedy=False
+#     ),
 # )
-# results["EULEX"] = solver_eulex.solve(x0, t_max)
+# results["EULEX_DE"] = solver_eulex_de.solve(x0, t_max)
 
 # solver_eulex_quad = EulerExtrapolation(
 #     x_dot,
@@ -68,25 +79,27 @@ h_average = t_max / len(
 # )
 # results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
 
-solver_eulex_ord = EulerExtrapolation(
-    x_dot,
-    table_size=8,
-    step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5),
-)
-results["EULEX_const_ord"] = solver_eulex_ord.solve(
-    x0,
-    t_max,
-    k_initial=solver_eulex_ord.table_size - 1,
-    # h_initial=0.5,
-)
+# solver_eulex_ord = EulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
+# )
+# results["EULEX_const_ord"] = solver_eulex_ord.solve(
+#     x0,
+#     t_max,
+#     k_initial=solver_eulex_ord.table_size - 1,
+#     # h_initial=0.5,
+# )
 
 # solver_eulex_mass = EulerExtrapolationMass(
 #     x_dot, np.identity(2), table_size=4, step_controller=StepControllerExtrapH()
 # )
 # results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
-# solver_odex = ModMidpointExtrapolation(x_dot, table_size=8)
-# results["ODEX"] = solver_odex.solve(x0, t_max)
+solver_odex = ModMidpointExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+)
+results["ODEX"] = solver_odex.solve(x0, t_max)
 
 # solver_odex_smoothed = ModMidpointExtrapolation(x_dot, table_size=8, use_smoothing=True)
 # results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
@@ -94,8 +107,13 @@ results["EULEX_const_ord"] = solver_eulex_ord.solve(
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-# solver_seulex = LimplicitEulerExtrapolation(x_dot, table_size=8, num_odes=x0.size)
-# results["SEULEX"] = solver_seulex.solve(x0, t_max)
+solver_seulex = LimplicitEulerExtrapolation(
+    x_dot,
+    table_size=8,
+    num_odes=x0.size,
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+)
+results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
 #     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble
@@ -111,12 +129,13 @@ results["EULEX_const_ord"] = solver_eulex_ord.solve(
 # results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
 
 # results
-fig, axes = plt.subplots(3, 1, sharex=True, tight_layout=True)
+fig, axes = plt.subplots(4, 1, sharex=True, tight_layout=True)
 axes[0].set_ylim(-5, 5)
 axes[1].set_yscale("log")
 axes[1].set_ylabel("error")
 axes[2].set_xlabel("time")
 axes[2].set_ylabel(r"$\Delta t$")
+axes[3].set_ylabel(r"$k$")
 
 t_ref = np.linspace(0, t_max, 101)
 axes[0].plot(
@@ -151,10 +170,18 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
         label=scheme_name,
         color=cmap(i),
     )
+    if "local_orders" in solve_info.keys():
+        axes[3].plot(
+            0.5 * (time[1:] + time[:-1]),
+            solve_info["local_orders"],
+            label=scheme_name,
+            color=cmap(i),
+        )
 
 axes[0].legend(frameon=False)
 axes[1].legend(frameon=False)
 axes[2].legend(frameon=False)
+axes[3].legend(frameon=False)
 plt.tight_layout()
 plt.show()
 # plt.savefig("./tmp_results.pdf", backend="pgf")

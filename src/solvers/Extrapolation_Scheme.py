@@ -270,7 +270,7 @@ class ExtrapolationSolver(ABC):
         while state == "continue":
             k_curr += 1
             # Basic operations: compute with more steps, then fill row in tableau
-            T_fine_first_order, is_diverging = self.base_scheme(
+            T_fine_base_order, is_diverging = self.base_scheme(
                 x_curr,
                 t_curr,
                 t_max=t_curr + step_size,
@@ -278,20 +278,22 @@ class ExtrapolationSolver(ABC):
                 jac0=jac0,
             )
             if(is_diverging): # early exit: we don't have to calculate the next result and check the error if we are already diverging
-                logger.debug(f"Early exit in stage {k_curr} due to divergence in the solver")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f"Early exit in stage {k_curr} due to divergence in the solver"
+                    )
                 state = "divergence"
                 break
 
-            last_table_diag= T_table_k[k_curr-1] # needs to be cached for error computation
-            self.fill_extrapolation_table(T_fine_first_order, T_table_k, k_curr)
+            # last_table_diag= T_table_k[k_curr-1] # needs to be cached for advanced error computation
+            self.fill_extrapolation_table(T_fine_base_order, T_table_k, k_curr)
 
             error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr]) # subdiagonal
-            # TODO: just temporary, last_table_diag is also not really required
-            error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
-            error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.step_controller.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
-            print(f"errors: {error}, {error_d}, {error_de}")
+            # error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
+            # error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.step_controller.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
 
-            logger.debug(f"Stage reached: {k_curr}, error: {error}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Stage reached: {k_curr}, error: {error}")
 
             # exit conditions
             state = self.step_controller.evaluate_step(
@@ -308,11 +310,12 @@ class ExtrapolationSolver(ABC):
         step_info["local_order"] = (k_curr + (not is_diverging))*self.order_exponent
         step_info["max_substeps"] = self.substep_seq[k_curr]
 
-        logger.debug(
-            "Finished step\n"
-            + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
-            + "\n"
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Finished step\n"
+                + "\n".join([f"{k}: {v}" for k, v in step_info.items()])
+                + "\n"
+            )
 
         return (
             T_table_k[k_curr],
@@ -328,10 +331,12 @@ class ExtrapolationSolver(ABC):
         t0: float = 0,
         k_initial: int | None = None,
         h_initial: float | None = None,
+        log_period: float | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
         """Solve the ODE with initial condition x0 from time t0 to t_max. If initial step size and order are not specified, heuristics provided by the step controller are used"""
 
         solve_info: dict[str, Any] = dict(
+            n_steps=0,
             n_feval=0,
             n_jaceval=0,
             n_lu=0,  # initial one for implicit ODEs is not counted
@@ -361,23 +366,27 @@ class ExtrapolationSolver(ABC):
             and k_target <= self.step_controller.k_max
         ), f"invalid initial target order {k_target}"
 
-        logger.debug(f"Beginning solve.")
+        if log_period is None:
+            log_period = step / (t_max - t0) * 20
+
+        logger.info(f"Beginning solve.")
 
         time = [t0]
         solution = [x0.astype(self.dtype)]
 
         allow_early_check = True  # allow quick order variation for first and last steps when target order is not optimal
         current_time = t0
+        t_last_log = t0
         while current_time < t_max:
             if (
                 current_time + step > t_max
-            ):  # shorten h if we would go further than necessary # TODO: this is inefficients since order selection is suboptimal
+            ):  # shorten h if we would go further than necessary # TODO: this is inefficient since order selection is suboptimal
                 step = t_max - current_time
                 allow_early_check = True
-
-            logger.debug(
-                f"Starting step at time {current_time:.3f} of {t_max} with k_target = {k_target}, h = {step:.2E}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Starting step at time {current_time:.3f} of {t_max} with k_target = {k_target}, h = {step:.2E}"
+                )
 
             # do step
             new_solution, state, k_final, step_info = self.extrapolation_step(
@@ -396,6 +405,7 @@ class ExtrapolationSolver(ABC):
                 allow_early_check = True
 
             # update info
+            solve_info["n_steps"] += 1
             solve_info["n_feval"] += step_info["n_feval"]
             solve_info["n_jaceval"] += step_info["n_jaceval"]
             solve_info["n_lu"] += step_info["n_lu"]
@@ -410,19 +420,30 @@ class ExtrapolationSolver(ABC):
                     self.step_controller.norm(step_info["local_error"])
                 )
                 solve_info["local_orders"].append(step_info["local_order"])
-                logger.debug("Accepted step, continuing.")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Accepted step, continuing.")
             else:
                 solve_info["n_restarts"] += 1
-                logger.debug("Rejected step, restarting.")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Rejected step, restarting.")
             # finding parameters for the next step
-            k_target, step = self.step_controller.get_next_step_parameters(
-                k_final, k_target, state
+            k_target, next_step_multiplier = (
+                self.step_controller.get_next_step_parameters(k_final, k_target, state)
             )
+            step *= next_step_multiplier
+
+            if current_time >= t_last_log + log_period:
+                logger.info(
+                    f"Current time {current_time:.3f} of {t_max}.\n steps = {solve_info['n_steps']}, restarts = {solve_info['n_restarts']}, stages: {k_target}"
+                )
+                t_last_log = current_time
 
         # finished
-        logger.debug(
+        logger.info(
             "Finished\n"
-            + "\n".join([f"{k}: {v}" for k, v in solve_info.items()])
+            + "\n".join(
+                [f"{k}: {v}" for k, v in solve_info.items() if not isinstance(v, list)]
+            )
             + "\n"
         )
 

@@ -2,24 +2,19 @@
 - rewrite in C++
 
 ## Extrapolation
-- controller prefers too low order
-- ODEX smoothed does not work
 - SODEX is not working
 - check indices in controller
 - find good default values for implicit_rel_costs (will depend on the equation, maybe even provide a function to find it automatically?)
 - convergence: compare actual h!
 
 - recompute Jacobian only if theta is above some tolerance
-- allow for early error checks after base scheme diverges
-- handle retries in Extrap or controller?
-- create select k*, h from retry, divergence, fail
-- where to handle divergence?
 - step shortening (at end) handled by controller
+- controller PI
 
 ## Tests
 - test implicit extrapolation schemes
 - convergence checks: h- and k-first
-- profile extrapolation code: nrom and product in step control is expensive -> NUMBA
+- profile extrapolation code: norm and product in step control is expensive -> NUMBA
 - test small table size -> indexing errors
 - test rational extrapolation
 
