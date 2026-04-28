@@ -367,7 +367,7 @@ class ExtrapolationSolver(ABC):
         ), f"invalid initial target order {k_target}"
 
         if log_period is None:
-            log_period = step / (t_max - t0) * 20
+            log_period = step / (t_max - t0) * 50
 
         logger.info(f"Beginning solve.")
 

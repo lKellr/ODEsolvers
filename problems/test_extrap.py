@@ -107,13 +107,13 @@ results["ODEX"] = solver_odex.solve(x0, t_max)
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-solver_seulex = LimplicitEulerExtrapolation(
-    x_dot,
-    table_size=8,
-    num_odes=x0.size,
-    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-)
-results["SEULEX"] = solver_seulex.solve(x0, t_max)
+# solver_seulex = LimplicitEulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     num_odes=x0.size,
+#     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+# )
+# results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
 #     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble

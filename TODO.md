@@ -2,6 +2,7 @@
 - rewrite in C++
 
 ## Extrapolation
+- errors are larger than tolerance
 - SODEX is not working
 - check indices in controller
 - find good default values for implicit_rel_costs (will depend on the equation, maybe even provide a function to find it automatically?)

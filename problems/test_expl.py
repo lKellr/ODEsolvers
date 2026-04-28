@@ -1,16 +1,17 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from modules.step_control import ControllerPIParams
+from modules.step_control import ControllerPIParams, StepControllerExtrapKH
 from solvers.embedded import *
 from solvers.explicit import *
+from solvers.Extrapolation_Scheme import EulerExtrapolation
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
 
-cmap = plt.get_cmap("tab20")
+cmap: plt.Colormap = plt.get_cmap("tab20")
 
 
 x_dot = lambda t, x: np.array(
@@ -71,6 +72,11 @@ results["DP45_I"] = DP45(
     ),
 )
 results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(results["DP45"][0]))
+
+solver_eulex = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+)
+results["EULEX"] = solver_eulex.solve(x0, t_max)
 
 
 # results

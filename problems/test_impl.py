@@ -12,6 +12,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 # from solvers.embedded import BS23
+from solvers.Extrapolation_Scheme import LimplicitEulerExtrapolation
 from solvers.explicit import PECE, AB_k
 from solvers.implicit import *
 import logging
@@ -81,6 +82,8 @@ results["AM5"] = AM_k(x_dot, x0, t_max, h, k=5, solvertol=1e-8)
 results["BDF2"] = BDF2(x_dot, x0, t_max, h)
 results["TR-BDF2"] = TRBDF2(x_dot, x0, t_max, h)
 results["BDF3"] = BDF3(x_dot, x0, t_max, h)
+# solver_seulex = LimplicitEulerExtrapolation(x_dot, num_odes=x0.size, table_size=16)
+# results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 fig, axes = plt.subplots(2, 1)
 axes[0].set_ylim(-5, 5)
