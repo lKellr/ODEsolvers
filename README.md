@@ -5,6 +5,8 @@ Explicit and implicit methods with variants for implicit ODEs, many different st
 Two very advanced step controllers for selecting pairs of step size and extrapolation order make for quite efficient schemes.
 New schemes or variants of existing schemes can readily be created by subclassing and overriding the relevant methods.
 
+Some examples of schemes that are available or can quickly be created are Bulirsch-Stoer, the schemes ODEX, EULEX, SODEX and SEULEX from Hairer and Wanner and METAN and DIFEX schemes from Deuflhard.
+
 For comparison purposes, there are also python implementations of several standard ODE solvers. This includes Runge-Kutta and basic multistep methods.
 Some helper functions for root finding and Jacobian computation are also available.
 All methods return function, Jacobian and LU computation/evaluation frequencies so that their relative performance can be compared.
