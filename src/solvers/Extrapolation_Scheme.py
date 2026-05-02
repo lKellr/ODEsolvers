@@ -290,7 +290,7 @@ class ExtrapolationSolver(ABC):
             # last_table_diag= T_table_k[k_curr-1] # needs to be cached for advanced error computation
             self.fill_extrapolation_table(T_fine_base_order, T_table_k, k_curr)
 
-            error = np.abs(T_table_k[k_curr - 1] - T_table_k[k_curr])  # subdiagonal
+            error = T_table_k[k_curr - 1] - T_table_k[k_curr]  # subdiagonal
             # error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
             # error_de = np.abs(last_table_diag - T_table_k[k_curr])/self.step_controller.err_reduction_at_step[k_curr-1] # diagonal-extrapolated
 
@@ -357,7 +357,7 @@ class ExtrapolationSolver(ABC):
 
         if h_initial is None:
             step = self.step_controller.get_initial_stepHW(
-                self.ode_fun, x0, t0=t0, p=k_target + 1
+                self.ode_fun, x0, t0=t0, p=k_target
             )
         else:
             step = h_initial

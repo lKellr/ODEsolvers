@@ -37,11 +37,15 @@ def get_default_PI_parameters_rejected(p: int) -> ControllerPIParams:
 def get_step_PI(
     err_ratio: float, err_ratio_last: float, control_params: ControllerPIParams
 ) -> float:
-    return clip(
-        (1.0 / err_ratio) ** control_params.alpha * err_ratio_last**control_params.beta,
-        control_params.s_limits[0],
-        control_params.s_limits[1],
-    )
+    if err_ratio == 0:
+        return control_params.s_limits[1]
+    else:
+        return clip(
+            (1.0 / err_ratio) ** control_params.alpha
+            * err_ratio_last**control_params.beta,
+            control_params.s_limits[0],
+            control_params.s_limits[1],
+        )
 
 
 class StepController(ABC):
@@ -94,10 +98,12 @@ class StepController(ABC):
         else:
             h0 = 0.01 * (d0 / d1)
 
-        U1_Eul = x0 + h0 * ode_fun(t0, x0)
-        d2 = self.norm((ode_fun(t0 + h0, U1_Eul) - f0) / tol) / h0
+        x1_Eul = x0 + h0 * f0
+        d2 = (
+            self.norm((ode_fun(t0 + h0, x1_Eul) - f0) / tol) / h0
+        )  # estimate of second derivative
 
-        h1 = (0.01 / max(d1, d2)) ** (1 / (p + 1))
+        h1 = (0.01 / max(d1, d2)) ** (1.0 / (p + 1))
         if max(d1, d2) <= 1e-15:
             h1 = max(1e-6, h0 * 1e-3)
 
@@ -268,7 +274,7 @@ class StepControllerExtrap(StepController, ABC):
     def _get_step_mult_opt(self, err_ratio_k: float, next_k: int) -> float:
         """returns the optimal factor by which the step should be multiplied to reach the prescribed tolerance levels"""
         order_exponent = (
-            1.0 / (2 * next_k + 1) if self.is_symmetric else 1.0 / (next_k + 1)  #
+            1.0 / (2 * next_k + 1) if self.is_symmetric else 1.0 / (next_k + 1)
         )  # NOTE: 2*k+1 since k starts at zero. Hairer&Wanner use 2*k-1 for k starting with 1
         temp_s_limit_descaled = self.s_limits_scaled[0] ** order_exponent
 
