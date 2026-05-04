@@ -32,8 +32,8 @@ x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).
 
 results = dict()
 
-results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
-results["DP45"] = DP45(
+results["BS32"] = BS32(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
+results["DP54"] = DP54(
     x_dot,
     x0,
     t_max,
@@ -41,7 +41,7 @@ results["DP45"] = DP45(
     atol=1e-5,
     rtol=1e-3,
 )
-results["DP45_I"] = DP45(
+results["DP54_I"] = DP54(
     x_dot,
     x0,
     t_max,
@@ -69,7 +69,7 @@ results["RKX4_3"] = RKX4(
     rtol=1e-3,
     extrap_step_ratio=3,
 )
-results["RK4"] = RK4(x_dot, x0, t_max, 0.67 * t_max / len(results["DP45"][0]))
+results["RK4"] = RK4(x_dot, x0, t_max, 0.67 * t_max / len(results["DP54"][0]))
 
 solver_eulex = EulerExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
@@ -140,21 +140,21 @@ ax.set_ylabel("step")
 ax.set_xlabel("time")
 
 ax.plot(
-    0.5 * (results["BS23"][0][:-1] + results["BS23"][0][1::]),
-    np.diff(results["BS23"][0]),
-    label="BS23",
+    0.5 * (results["BS32"][0][:-1] + results["BS32"][0][1::]),
+    np.diff(results["BS32"][0]),
+    label="BS32",
     color=cmap(0),
 )
 ax.plot(
-    0.5 * (results["DP45"][0][:-1] + results["DP45"][0][1::]),
-    np.diff(results["DP45"][0]),
-    label="DP45",
+    0.5 * (results["DP54"][0][:-1] + results["DP54"][0][1::]),
+    np.diff(results["DP54"][0]),
+    label="DP54",
     color=cmap(1),
 )
 ax.plot(
-    0.5 * (results["DP45_I"][0][:-1] + results["DP45_I"][0][1::]),
-    np.diff(results["DP45_I"][0]),
-    label="DP45_I",
+    0.5 * (results["DP54_I"][0][:-1] + results["DP54_I"][0][1::]),
+    np.diff(results["DP54_I"][0]),
+    label="DP54_I",
     color=cmap(2),
 )
 ax.plot(

@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 from modules.step_control import StepControllerExtrapKH
-from solvers.embedded import DP45
+from solvers.embedded import DP54
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
@@ -83,13 +83,13 @@ time, result, solve_info = solver_eulex.solve(x0, t_max)
 prof_elapsed = perf_counter() - prof_tim_start
 print(f"solution took {prof_elapsed:.3f} s for EULEX")
 
-# # DP45
+# # DP54
 # prof_tim_start = perf_counter()
-# time, result, solve_info = DP45(
+# time, result, solve_info = DP54(
 #     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
 # )
 # prof_elapsed = perf_counter() - prof_tim_start
-# print(f"solution took {prof_elapsed:.3f} s for DP45")
+# print(f"solution took {prof_elapsed:.3f} s for DP54")
 
 fig, ax = plt.subplots(figsize=(16, 6), layout="tight")
 fig.set_tight_layout(True)

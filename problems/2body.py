@@ -2,7 +2,7 @@ from numba import njit
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
-from solvers.embedded import DP45
+from solvers.embedded import DP54
 from solvers.explicit import *
 import logging
 
@@ -51,7 +51,7 @@ x0 = np.hstack((initial_positions.flatten(), masses2 * initial_velocities.flatte
 
 assert x0.size == (2 * n * dim), f"Wrong shape {x0.shape} of initial condition"
 
-time, result, solve_info = DP45(
+time, result, solve_info = DP54(
     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
 )
 

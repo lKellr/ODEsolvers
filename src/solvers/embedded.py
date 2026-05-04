@@ -14,7 +14,7 @@ from modules.step_control import (
 logger = logging.getLogger(__name__)
 
 
-def DP45(
+def DP54(
     ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
@@ -31,22 +31,22 @@ def DP45(
         local_errors=[],
     )
     if "control_params" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params"] = get_default_PI_parameters(4)
+        step_controller_kwargs["control_params"] = get_default_PI_parameters(5)
     if "control_params_rejected" not in step_controller_kwargs.keys():
         step_controller_kwargs["control_params_rejected"] = (
-            get_default_PI_parameters_rejected(4)
+            get_default_PI_parameters_rejected(5)
         )
     step_controller = StepControllerPI(**step_controller_kwargs)
 
     if h0 is None:
-        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=4)
+        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=5)
     else:
         h = h0
 
     t = [t0]
     x = [x0]
-    t_crit = []
-    x_crit = []
+    t_crit: list[float] = []
+    x_crit: list[NDArray[np.floating]] = []
 
     ix_step = 0
     k1 = ode_fun(t0, x0)  # FSAL property
@@ -98,7 +98,7 @@ def DP45(
             t_pred, x_pred
         )  # reusing k2 instead of new variable k7, as it is not used again
 
-        err = (
+        err = h * (
             71 / 57600 * k1
             - 71 / 16695 * k3
             + 71 / 1920 * k4
@@ -135,7 +135,7 @@ def DP45(
     return np.array(t), np.array(x), info
 
 
-def BS23(
+def BS32(
     ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
     x0: NDArray[np.floating],
     t_max: float,
@@ -150,25 +150,26 @@ def BS23(
         n_jaceval=0,
         n_lu=0,
         n_restarts=0,
+        local_errors=[],
     )
 
     if "control_params" not in step_controller_kwargs.keys():
-        step_controller_kwargs["control_params"] = get_default_PI_parameters(4)
+        step_controller_kwargs["control_params"] = get_default_PI_parameters(3)
     if "control_params_rejected" not in step_controller_kwargs.keys():
         step_controller_kwargs["control_params_rejected"] = (
-            get_default_PI_parameters_rejected(4)
+            get_default_PI_parameters_rejected(3)
         )
     step_controller = StepControllerPI(**step_controller_kwargs)
 
     if h0 is None:
-        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=2)
+        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=3)
     else:
         h = h0
 
     t = [t0]
     x = [x0]
-    t_crit = []
-    x_crit = []
+    t_crit: list[float] = []
+    x_crit: list[NDArray[np.floating]] = []
 
     ix_step = 0
     k1 = ode_fun(t[0], x[0])  # FSAL
@@ -183,7 +184,7 @@ def BS23(
         x_pred = x[ix_step] + h * (2 * k1 + 3 * k2 + 4 * k3) / 9
         k4 = ode_fun(t_pred, x_pred)
 
-        err = -5 / 72 * k1 + 1 / 12 * k2 + 1 / 9 * k3 - 1 / 8 * k4
+        err = h * (-5 / 72 * k1 + 1 / 12 * k2 + 1 / 9 * k3 - 1 / 8 * k4)
         # h*np.linalg.norm(71/57600*k1-71/16695*k3+71/1920*k4-17253/339200*k5+22/525*k6-1/40*k2, ord=np.inf) #local error:||x_pred-X_pred7||
 
         h, accepted = step_controller.evaluate_step(h, err, x[ix_step], x_pred)
@@ -193,10 +194,99 @@ def BS23(
             x.append(x_pred)
             k1 = k4
             ix_step += 1
+            info["local_errors"].append(step_controller.norm(err))
         else:
             t_crit.append(t_pred)
             x_crit.append(x_pred)
     info["n_feval"] = 1 + (len(t) - 1 + len(t_crit)) * 3
+    info["n_restarts"] = len(t_crit)
+    info["restarts"] = (t_crit, x_crit)
+    return np.array(t), np.array(x), info
+
+
+def RKX4(
+    ode_fun: Callable[[float, NDArray[np.floating]], NDArray[np.floating]],
+    x0: NDArray[np.floating],
+    t_max: float,
+    t0: float = 0.0,
+    h0: float | None = None,
+    extrap_step_ratio: int = 2,
+    **step_controller_kwargs: dict[str, Any],
+) -> tuple[NDArray[np.floating], NDArray[np.floating], dict[str, Any]]:
+    """Classical Runge-Kutta Method with step control. Instead of using an embedded stage, this method approximates the error by a single step of Richardson extrapolation"""
+
+    info: dict[str, Any] = dict(
+        n_feval=0,
+        n_jaceval=0,
+        n_lu=0,
+        n_restarts=0,
+        local_errors=[],
+    )
+
+    if "control_params" not in step_controller_kwargs.keys():
+        step_controller_kwargs["control_params"] = get_default_PI_parameters(5)
+    if "control_params_rejected" not in step_controller_kwargs.keys():
+        step_controller_kwargs["control_params_rejected"] = (
+            get_default_PI_parameters_rejected(5)
+        )
+    step_controller = StepControllerPI(**step_controller_kwargs)
+
+    if h0 is None:
+        h = step_controller.get_initial_stepHW(ode_fun, x0, t0=t0, p=5)
+    else:
+        h = h0
+
+    def do_RK4(
+        x_i: NDArray[np.floating], t_i: float, h: float, f_i: NDArray[np.floating]
+    ):
+        k1 = f_i
+        k2 = ode_fun(t_i + 0.5 * h, x_i + 0.5 * h * k1)
+        k3 = ode_fun(t_i + 0.5 * h, x_i + 0.5 * h * k2)
+        k4 = ode_fun(t_i + h, x_i + h * k3)
+        return x_i + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+
+    t = [t0]
+    x = [x0]
+    t_crit: list[float] = []
+    x_crit: list[NDArray[np.floating]] = []
+
+    ix_step = 0
+    while t[ix_step] < t_max:  # iterate until t_max is reached
+        if t[ix_step] + h > t_max:  # shorten h if we would go further than necessary
+            h = t_max - t[ix_step]
+
+        t_pred = t[ix_step] + h
+
+        f_i = ode_fun(t[ix_step], x[ix_step])
+
+        x_coarse = do_RK4(x[ix_step], t[ix_step], h, f_i)
+
+        x_fine = do_RK4(x[ix_step], t[ix_step], h / extrap_step_ratio, f_i)
+        for j in range(1, extrap_step_ratio):
+            x_fine = do_RK4(
+                x_fine,
+                t[ix_step] + j * h / extrap_step_ratio,
+                h / extrap_step_ratio,
+                ode_fun(t[ix_step] + j * h / extrap_step_ratio, x_fine),
+            )
+
+        x_extrap = x_fine + (x_fine - x_coarse) / (extrap_step_ratio**4 - 1.0)
+
+        err = (
+            x_fine - x_extrap
+        )  # NOTE: alternatively: err = x_fine - x_coarse (better error estimate for lower error, suggested by NR, Deuflhard and H&W prefer subdiagonal, thats why I am using it)
+        x_pred = x_extrap  # NOTE: continue with higher order estimate at cost of worse error estimation (which is not that great anyway)
+        h, accepted = step_controller.evaluate_step(h, err, x[ix_step], x_pred)
+
+        if accepted:  # accept result if tolerance is met, or we cant decrease h anymore
+            t.append(t_pred)
+            x.append(x_pred)
+            ix_step += 1
+            info["local_errors"].append(step_controller.norm(err))
+        else:
+            t_crit.append(t_pred)
+            x_crit.append(x_pred)
+    info["n_feval"] = (len(t) - 1 + len(t_crit)) * 11
     info["n_restarts"] = len(t_crit)
     info["restarts"] = (t_crit, x_crit)
     return np.array(t), np.array(x), info

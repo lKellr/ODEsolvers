@@ -31,7 +31,7 @@ x_dot: Callable[[float, NDArray[floating]], NDArray[floating]] = lambda t, x: np
     ]
 )
 
-t_max = 5.0
+t_max = 1.0
 x0 = np.array([1.0, np.e])
 
 x_analytic: Callable[[float], NDArray[floating]] = lambda t: np.array(
@@ -40,7 +40,7 @@ x_analytic: Callable[[float], NDArray[floating]] = lambda t: np.array(
 
 
 results = dict()
-results["DP45"] = DP45(
+results["DP54"] = DP54(
     x_dot,
     x0,
     t_max,
@@ -49,7 +49,7 @@ results["DP45"] = DP45(
     rtol=1e-5,
 )
 h_average = t_max / len(
-    results["DP45"][0]
+    results["DP54"][0]
 )  # use the same number of steps as the adaptive scheme
 
 solver_eulex = EulerExtrapolation(

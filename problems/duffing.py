@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import logging
 
-from solvers.embedded import DP45
+from solvers.embedded import DP54
 
 # logging.basicConfig(level=logging.DEBUG)
 # logger_mpb = logging.getLogger("matplotlib")
@@ -24,7 +24,7 @@ t_max = 800 * np.pi
 x0 = np.array([1.0, 0])
 
 
-time, result, solve_info = DP45(
+time, result, solve_info = DP54(
     x_dot,
     x0,
     t_max,

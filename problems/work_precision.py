@@ -37,7 +37,7 @@ x_analytic: Callable[[float], NDArray[floating]] = lambda t: np.array([np.exp(np
 
 # create reference solution
 def create_solution(x_dot: Callable[[float, NDArray[floating]], NDArray[floating]], x0: NDArray[loating], t_max: float)-> tuple(float, NDArray[floating]):# -> tuple[NDArray[floating[Any]], ndarray[_AnyShape, dtype[Any]]]:# -> tuple[NDArray[floating[Any]], ndarray[_AnyShape, dtype[Any]]]:# -> tuple[NDArray[floating[Any]], ndarray[_AnyShape, dtype[Any]]]:# -> tuple[NDArray[floating[Any]], ndarray[_AnyShape, dtype[Any]]]:# -> tuple[NDArray[floating[Any]], ndarray[_AnyShape, dtype[Any]]]:
-    t, x, info = DP45(x_dot, x0.astype(np.longdouble), t_max, atol=1e-8, rtol=1e-6)
+    t, x, info = DP54(x_dot, x0.astype(np.longdouble), t_max, atol=1e-8, rtol=1e-6)
 
     fig, ax = plt.subplots()
     ax.plot(t, x[:, 0])
@@ -151,8 +151,8 @@ results["AB3"] = benchmark_scheme(
 results["RK4"] = benchmark_scheme(
     RK4, 4, h0=0.01, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 )
-results["DP45"] = benchmark_scheme(
-    DP45, None, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
+results["DP54"] = benchmark_scheme(
+    DP54, None, h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]
 )
 # results["SEULEX"] = benchmark_scheme(
 #     , , h0=0.1, target_errs=[1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6]

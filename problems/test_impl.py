@@ -11,7 +11,7 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 
-# from solvers.embedded import BS23
+# from solvers.embedded import BS32
 from solvers.Extrapolation_Scheme import LimplicitEulerExtrapolation
 from solvers.explicit import PECE, AB_k
 from solvers.implicit import *
@@ -73,7 +73,7 @@ x_analytic = lambda t: np.array(
 
 results = dict()
 h = 1e-2
-# results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
+# results["BS32"] = BS32(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 results["BackwardsEuler"] = Backwards_Euler(x_dot, x0, t_max, h)
 results["AM3"] = AM_k(x_dot, x0, t_max, h, k=3)
 results["PECE"] = PECE(x_dot, x0, t_max, h)

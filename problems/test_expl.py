@@ -30,9 +30,9 @@ x0 = np.array([1.0, np.e])
 x_analytic = lambda t: np.array([np.exp(np.sin(t * t)), np.exp(np.cos(t * t))]).T
 
 results = dict()
-results["BS23"] = BS23(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
+results["BS32"] = BS32(x_dot, x0, t_max, atol=1e-5, rtol=1e-3)
 h = t_max / len(
-    results["BS23"][0]
+    results["BS32"][0]
 )  # use the same number of steps as the adaptive scheme to show its advantages
 results["Euler"] = Euler(x_dot, x0, t_max, h)
 results["Midpoint"] = Midpoint(x_dot, x0, t_max, h)
@@ -44,7 +44,7 @@ results["PECE"] = PECE(x_dot, x0, t_max, h, n_rep=1)
 results["AB_6"] = AB_k(x_dot, x0, t_max, h, k=6)
 results["SSPRK3"] = SSPRK3(x_dot, x0, t_max, h)
 results["SSPRK34"] = SSPRK34(x_dot, x0, t_max, h)
-results["DP45"] = DP45(
+results["DP54"] = DP54(
     x_dot,
     x0,
     t_max,
@@ -60,7 +60,7 @@ results["RKX4"] = RKX4(
     atol=1e-5,
     rtol=1e-3,
 )
-results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(results["DP45"][0]))
+results["RK4"] = RK4(x_dot, x0, t_max, t_max / len(results["DP54"][0]))
 
 solver_eulex = EulerExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)

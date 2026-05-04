@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
-from solvers.embedded import DP45
+from solvers.embedded import DP54
 from modules.helpers import norm_hairer
 
 
@@ -11,11 +11,11 @@ def find_local_errors(
     x_computed: NDArray[np.floating],
     norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
 ) -> NDArray[np.floating]:
-    """computes the local error using DP45"""
+    """computes the local error using DP54"""
     err_loc = np.empty(x_computed.shape[0])
     err_loc[0] = 0.0
     for ix_time in range(t.size - 1):
-        _, x_analytic, _ = DP45(
+        _, x_analytic, _ = DP54(
             x_dot,
             x0=x_computed[ix_time],
             t0=t[ix_time],
