@@ -607,7 +607,6 @@ class EulerExtrapolationRational(EulerExtrapolation):
                         (
                             (self.substep_seq[k] / self.substep_seq[k - j])
                             ** self.order_exponent
-                            - 1.0
                         )
                         if j <= k
                         else None  # will be cast to NaN
