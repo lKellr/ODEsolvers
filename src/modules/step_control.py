@@ -421,7 +421,7 @@ class StepControllerExtrapKH(StepControllerExtrap):
             state = "divergence"
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous eror ratio: {self.error_ratios_k[k_curr - 1]}"
+                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous error ratio: {self.error_ratios_k[k_curr - 1]}"
                 )
         elif k_curr >= k_target - self.pre_check_window or allow_early_check:
             if error_ratio <= 1.0:  # Convergence in line k_target − 1; or  k_target

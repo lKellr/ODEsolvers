@@ -382,7 +382,7 @@ class ExtrapolationSolver(ABC):
         while current_time < t_max:
             if (
                 current_time + step > t_max
-            ):  # shorten h if we would go further than necessary # TODO: this is inefficient since order selection is suboptimal
+            ):  # shorten h if we would go further than necessary # TODO: this is inefficient since order selection is suboptimal with trucated step sizes
                 step = t_max - current_time
                 allow_early_check = True
             if logger.isEnabledFor(logging.DEBUG):
@@ -503,11 +503,11 @@ class EulerExtrapolation(ExtrapolationSolver):
         """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
-        x_n = x0
+        x_n = x0.copy()
         t_n = t0
         for _ in range(n_steps):
             delta_x = delta_t * self.ode_fun(t_n, x_n)
-            x_n = x_n + delta_x
+            x_n += delta_x
             t_n += delta_t
         return x_n, False
 
@@ -564,7 +564,7 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
-        x_n = x0
+        x_n = x0.copy()
         t_n = t0
         for _ in range(n_steps):
             delta_x = lu_solve(
@@ -574,7 +574,7 @@ class EulerExtrapolationMass(ExtrapolationSolver):
                 check_finite=False,
             )
 
-            x_n = x_n + delta_x
+            x_n += delta_x
             t_n += delta_t
         return x_n, False
 
@@ -633,7 +633,7 @@ class EulerExtrapolationRational(EulerExtrapolation):
         This variant uses rational instead of polynomial extraplation
         """
         T_extrap = T_fine_first_order
-        T_coarselow = 0.0
+        T_coarselow = np.zeros_like(T_fine_first_order)
 
         # perform repeated Richardson extrapolation until the target order has been reached,
         # T_table_k starts with lower resolution approximations from a previous extrapolation
@@ -883,35 +883,48 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         assert jac0 is not None
 
         delta_t = (t_max - t0) / n_steps
-        lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
+        lu_and_piv = lu_factor(
+            self.mass_matrix - delta_t * jac0, overwrite_a=True, check_finite=False
+        )
 
-        x_n = x0
+        x_n = x0.copy()
         t_n = t0
-        delta_x_0: NDArray[np.floating]
+        delta_x_0: np.floating
         for n in range(n_steps):
-            rhs = delta_t * self.ode_fun(t_n, x_n)
+            rhs = delta_t * self.ode_fun(
+                t_n + delta_t, x_n
+            )  # NOTE: t_n + delta_t modification for non-autonomous ODEs
             delta_x: NDArray[np.floating] = lu_solve(
-                lu_and_piv, rhs, overwrite_b=False, check_finite=False
-            )  # NOTE: i can not overwrite b here because of the convergence check
+                lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
+            )  # NOTE: i can not overwrite b for n==1 because of the convergence check
             x_n += delta_x
             t_n += delta_t
 
+            f_new = self.ode_fun(t_n, x_n)
+
             if n == 0:
-                delta_x_0 = delta_x  # cache for stability check
+                delta_x_0 = self.norm(
+                    delta_x
+                )  # store for stability check # TODO: limit in case delta_x_0 is zero
             elif n == 1:  # stability check
-                theta = (
-                    lu_solve(  # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
+                delta_x_1: np.floating = self.norm(
+                    lu_solve(
                         lu_and_piv,
                         b=rhs
                         - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
                         overwrite_b=True,
                         check_finite=False,
                     )
-                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
                 )
-                if self.norm(theta) > 1.0:
+                conv_rate = (
+                    delta_x_1 / delta_x_0
+                )  # pyright: ignore[reportPossiblyUnboundVariable]
+                if conv_rate > 1.0:
                     return x_n, True
             # delta_x_prev = delta_x
+            print(
+                f"x0: {x0},x_new: {x_n}, dx: {delta_x}\nNewton error: {self.norm(delta_x)}, residual: {self.norm(delta_t * f_new)}, jacobian error: {self.norm(f_new - (self.ode_fun(t0, x0)+jac0*(x_n - x0)))}"
+            )
         return x_n, False
 
 
@@ -990,40 +1003,42 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         assert jac0 is not None
 
         delta_t = (t_max - t0) / n_steps
-        lu_and_piv = lu_factor(self.mass_matrix - delta_t * jac0)
+        lu_and_piv = lu_factor(
+            self.mass_matrix - delta_t * jac0, overwrite_a=True, check_finite=False
+        )
 
         # start with a linearized-implicit euler step
-        rhs = delta_t * self.ode_fun(t0, x0)
+        rhs = delta_t * self.ode_fun(
+            t0, x0
+        )  # NOTE: evaluation not at t0 + delta_t, might destroy symmetry?
         delta_x: NDArray[np.floating] = lu_solve(
             lu_and_piv, rhs, overwrite_b=True, check_finite=False
         )
-        delta_x_0 = delta_x
+        delta_x_0: np.floating[Any] = self.norm(delta_x)
         x_n = x0 + delta_x
         t_n = t0 + delta_t
 
         # continue with linearly implicit midpoint
         for n in range(1, n_steps):
-            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
-            delta_x = delta_x + lu_solve(
-                lu_and_piv, rhs, overwrite_b=False, check_finite=False
+            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            delta_x += lu_solve(
+                lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
             )  # NOTE: i can not overwrite b here because of the convergence check
             x_n += delta_x
             t_n += delta_t
 
             if n == 1:  # stability check
-                theta = (
-                    0.5 * (delta_x - delta_x_0) / delta_x_0
-                )  # NOTE: I calculate the norm after component-wise division instead of the ratio of the norms
-                if self.norm(theta) > 1.0:
+                conv_rate = (
+                    0.5 * (self.norm(delta_x) - delta_x_0) / delta_x_0
+                )  # TODO: norm around difference?
+                if conv_rate > 1.0:
                     return x_n, True
 
         if (
             self.use_smoothing
         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-            rhs = 2 * delta_t * (self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
-            delta_x = delta_x + lu_solve(
-                lu_and_piv, rhs, overwrite_b=True, check_finite=False
-            )
+            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            delta_x += lu_solve(lu_and_piv, rhs, overwrite_b=True, check_finite=False)
             x_n = x_n + 0.5 * delta_x
 
         return x_n, False

@@ -76,7 +76,7 @@ def Newton(
     jac = jac_fun(x0)
     lu, piv = lu_factor(jac)
 
-    x = np.copy(x0)
+    x = x0.copy()
     norm_delta = np.inf
     norm_delta_last = np.inf
     iter = 0
@@ -144,7 +144,7 @@ def NewtonODE(
     jac = jac_fun(x0)
     lu, piv = lu_factor(jac)
 
-    x = np.copy(x0)
+    x = x0.copy()
     norm_delta = np.nan
     norm_delta_last = np.nan
     eta = max(eta_old, np.finfo(x0.dtype).eps) ** 0.8

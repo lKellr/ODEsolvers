@@ -1,7 +1,10 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from solvers.simple_explicit import *
-from solvers.Extrapolation_Scheme import SEULEX
+from solvers.explicit import *
+from solvers.Extrapolation_Scheme import (
+    EulerExtrapolation,
+    LimplicitEulerExtrapolation,
+)
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -16,7 +19,7 @@ x_dot = lambda t, x: np.array(
 t_max = 100.0
 x0 = np.array([1.0, 1.0, 1.0])
 
-s = SEULEX(ode_fun=x_dot, num_odes=2, jac_fun=None, atol=1e-3, rtol=1e-2, table_size=12)
+s = EulerExtrapolation(ode_fun=x_dot)
 time, result, solve_info = s.solve(x0, t_max, 1e-3)
 
 fig, ax = plt.subplots()

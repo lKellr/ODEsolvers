@@ -92,28 +92,40 @@ results["EULEX"] = solver_eulex.solve(x0, t_max)
 # )
 
 # solver_eulex_mass = EulerExtrapolationMass(
-#     x_dot, np.identity(2), table_size=4, step_controller=StepControllerExtrapH()
+#     x_dot, np.identity(2), x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 # )
 # results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
+
+# solver_eulex_rat = EulerExtrapolationRational(
+#     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+# )
+# results["EULEX_rational"] = solver_eulex_rat.solve(x0, t_max)
 
 solver_odex = ModMidpointExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 )
 results["ODEX"] = solver_odex.solve(x0, t_max)
 
-# solver_odex_smoothed = ModMidpointExtrapolation(x_dot, table_size=8, use_smoothing=True)
-# results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
+solver_odex_smoothed = ModMidpointExtrapolation(
+    x_dot,
+    table_size=8,
+    use_smoothing=True,
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+)
+results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
 
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-# solver_seulex = LimplicitEulerExtrapolation(
-#     x_dot,
-#     table_size=8,
-#     num_odes=x0.size,
-#     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-# )
-# results["SEULEX"] = solver_seulex.solve(x0, t_max)
+solver_seulex = LimplicitEulerExtrapolation(
+    x_dot,
+    table_size=8,
+    num_odes=x0.size,
+    # step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
+    step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+    # step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+)
+results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
 #     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble
