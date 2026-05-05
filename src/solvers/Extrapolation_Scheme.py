@@ -916,8 +916,9 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
                     )
                 )
                 conv_rate = (
-                    delta_x_1 / delta_x_0
-                )  # pyright: ignore[reportPossiblyUnboundVariable]
+                    delta_x_1
+                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                )
                 if conv_rate > 1.0:
                     return x_n, True
             # delta_x_prev = delta_x
@@ -1013,7 +1014,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         delta_x: NDArray[np.floating] = lu_solve(
             lu_and_piv, rhs, overwrite_b=True, check_finite=False
         )
-        delta_x_0: np.floating[Any] = self.norm(delta_x)
+        delta_x_0: NDArray[np.floating] = delta_x.copy()
         x_n = x0 + delta_x
         t_n = t0 + delta_t
 
@@ -1027,9 +1028,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             t_n += delta_t
 
             if n == 1:  # stability check
-                conv_rate = (
-                    0.5 * (self.norm(delta_x) - delta_x_0) / delta_x_0
-                )  # TODO: norm around difference?
+                conv_rate = 0.5 * self.norm(delta_x - delta_x_0) / self.norm(delta_x_0)
                 if conv_rate > 1.0:
                     return x_n, True
 
@@ -1037,7 +1036,9 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             self.use_smoothing
         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
             rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
-            delta_x += lu_solve(lu_and_piv, rhs, overwrite_b=True, check_finite=False)
-            x_n = x_n + 0.5 * delta_x
+            solve_final = lu_solve(
+                lu_and_piv, rhs, overwrite_b=True, check_finite=False
+            )  # NOTE: this is not delta_x_final (delta_x_final = delkta_x + solve_final)
+            x_n += 0.5 * solve_final
 
         return x_n, False

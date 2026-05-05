@@ -2,8 +2,9 @@
 - rewrite in C++
 
 ## Extrapolation
-- errors are larger than tolerance
-- SODEX is not working
+- rational extrpolation is not working good enough
+- Deuflhard control not working at k=1
+
 - find good default values for implicit_rel_costs (will depend on the equation, maybe even provide a function to find it automatically?)
 - convergence: compare actual h!
 

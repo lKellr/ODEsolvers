@@ -11,6 +11,8 @@ For comparison purposes, there are also python implementations of several standa
 Some helper functions for root finding and Jacobian computation are also available.
 All methods return function, Jacobian and LU computation/evaluation frequencies so that their relative performance can be compared.
 
+Some test problems are supplied. Additionally, there are so scripts to evaluate and compare the different methods
+
 # Examples
 ## work-precision graphs
 ![work-precision-explicit](work_precision.png)

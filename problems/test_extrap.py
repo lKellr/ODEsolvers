@@ -96,10 +96,10 @@ results["EULEX"] = solver_eulex.solve(x0, t_max)
 # )
 # results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
-# solver_eulex_rat = EulerExtrapolationRational(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
-# )
-# results["EULEX_rational"] = solver_eulex_rat.solve(x0, t_max)
+solver_eulex_rat = EulerExtrapolationRational(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+)
+results["EULEX_rational"] = solver_eulex_rat.solve(x0, t_max)
 
 solver_odex = ModMidpointExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
@@ -132,11 +132,17 @@ results["SEULEX"] = solver_seulex.solve(x0, t_max)
 # )
 # results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
 
-# solver_sodex = LimplicitMidpointExtrapolation(x_dot, num_odes=x0.size)
+# solver_sodex = LimplicitMidpointExtrapolation(
+#     x_dot, num_odes=x0.size, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
+# )
 # results["SODEX"] = solver_sodex.solve(x0, t_max)
 
 # solver_sodex_smoothed = LimplicitMidpointExtrapolation(
-#     x_dot, table_size=8, num_odes=x0.size, use_smoothing=True
+#     x_dot,
+#     table_size=8,
+#     num_odes=x0.size,
+#     step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+#     use_smoothing=True,
 # )
 # results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
 

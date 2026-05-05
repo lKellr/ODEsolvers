@@ -211,7 +211,7 @@ for n_steps in N_list:
         num_odes=1,
         jac_fun=jac,
         step_controller=StepControllerExtrapDummy(),
-        use_smoothing=True,
+        use_smoothing=False,
     )
     time, result, solve_info = solver_sodex3.solve(
         x0, t_max, k_initial=1, h_initial=t_max / n_steps
@@ -219,24 +219,24 @@ for n_steps in N_list:
     errors.append(norm(result[-1] - x_analytic(time[-1])))
 conv_data["SODEX3"] = np.array(errors)
 
-# errors = list()
-# for n_steps in N_list:
-#     solver_sodex3s = LimplicitMidpointExtrapolation(
-#         ode_fun=x_dot,
-#         table_size=8,
-#         num_odes=1,
-#         jac_fun=jac,
-#         step_controller=StepControllerExtrapDummy(),
-#         use_smoothing=True,
-#     )
-#     time, result, solve_info = solver_sodex3s.solve(
-#         x0, t_max, k_initial=1, h_initial=t_max / n_steps
-#     )
-#     errors.append(norm(result[-1] - x_analytic(time[-1])))
-# conv_data["SODEX3smoothed"] = np.array(errors)
+errors = list()
+for n_steps in N_list:
+    solver_sodex3s = LimplicitMidpointExtrapolation(
+        ode_fun=x_dot,
+        table_size=8,
+        num_odes=1,
+        jac_fun=jac,
+        step_controller=StepControllerExtrapDummy(),
+        use_smoothing=True,
+    )
+    time, result, solve_info = solver_sodex3s.solve(
+        x0, t_max, k_initial=1, h_initial=t_max / n_steps
+    )
+    errors.append(norm(result[-1] - x_analytic(time[-1])))
+conv_data["SODEX3smoothed"] = np.array(errors)
 
 # results
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(9.6, 7.2))
 # ax.set_ylim(-5, 5)
 ax.set_xscale("log")
 ax.set_yscale("log")
@@ -252,4 +252,5 @@ for i, (scheme_name, errors) in enumerate(conv_data.items()):
 
 plt.legend(frameon=False)
 plt.tight_layout()
+# plt.savefig("convergence.png")
 plt.show()
