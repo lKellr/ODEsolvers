@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from modules.post_processing import find_local_errors
 from modules.step_control import (
     ControllerPIParams,
+    StepControllerExtrapBulirsch,
     StepControllerExtrapK,
     StepControllerExtrapH,
     StepControllerExtrapKH,
@@ -31,7 +32,7 @@ x_dot: Callable[[float, NDArray[floating]], NDArray[floating]] = lambda t, x: np
     ]
 )
 
-t_max = 1.0
+t_max = 5.0
 x0 = np.array([1.0, np.e])
 
 x_analytic: Callable[[float], NDArray[floating]] = lambda t: np.array(
@@ -96,11 +97,6 @@ results["EULEX"] = solver_eulex.solve(x0, t_max)
 # )
 # results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
-solver_eulex_rat = EulerExtrapolationRational(
-    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
-)
-results["EULEX_rational"] = solver_eulex_rat.solve(x0, t_max)
-
 solver_odex = ModMidpointExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 )
@@ -114,18 +110,30 @@ solver_odex_smoothed = ModMidpointExtrapolation(
 )
 results["ODEX_smoothed"] = solver_odex_smoothed.solve(x0, t_max)
 
+solver_odex_rat = ModMidpointExtrapolationRational(
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+)
+results["ODEX_rational"] = solver_odex_rat.solve(x0, t_max)
+
+solver_BGS = ModMidpointExtrapolationRational(
+    x_dot,
+    table_size=10,
+    step_controller=StepControllerExtrapBulirsch(atol=1e-7, rtol=1e-5),
+)
+results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=7)
+
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
-solver_seulex = LimplicitEulerExtrapolation(
-    x_dot,
-    table_size=8,
-    num_odes=x0.size,
-    # step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
-    step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
-    # step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-)
-results["SEULEX"] = solver_seulex.solve(x0, t_max)
+# solver_seulex = LimplicitEulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     num_odes=x0.size,
+#     # step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
+#     step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+#     # step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+# )
+# results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
 # solver_seulex_quad = LimplicitEulerExtrapolation(
 #     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble

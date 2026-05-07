@@ -950,3 +950,102 @@ class StepControllerExtrapDummy(StepControllerExtrap):
         ), f"Step was finished with k_final = {k_final} not equal to k_tagret = {k_target}. This should not occur with this controller."
 
         return k_target, 1.0
+
+
+class StepControllerExtrapBulirsch(StepControllerExtrap):
+    """"""
+
+    def __init__(
+        self,
+        atol: float | NDArray[np.floating] = 10**-8,
+        rtol: float | NDArray[np.floating] = 10**-5,
+        norm: Callable[[NDArray[np.floating]], np.floating] = norm_hairer,
+        safety_unscaled: float = (0.9),
+        safety_tol: float = (0.65),
+        s_limits_scaled: tuple[float, float] = (0.02, 4.0),
+        step_multiplier_divergence: float = 0.5,
+        dtype: DTypeLike = np.double,
+    ) -> None:
+        super().__init__(
+            0,
+            atol,
+            rtol,
+            norm,
+            safety_unscaled,
+            safety_tol,
+            s_limits_scaled,
+            step_multiplier_divergence,
+            dtype,
+        )
+        self.error_ratio = np.nan
+
+    def initialize_scheme(
+        self,
+        is_symmetric: bool,
+        table_size: int,
+        err_reduction_at_step: NDArray[np.floating],
+        total_feval_cost_for_k: NDArray[np.floating],
+    ):
+        super().initialize_scheme(
+            is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k
+        )
+
+    @override
+    def evaluate_step(
+        self,
+        error: NDArray[np.floating],
+        x_curr: NDArray[np.floating],
+        x_pred: NDArray[np.floating],
+        k_curr: int,
+        k_target: int,
+        allow_early_check: bool = False,
+    ) -> contr_ext_state_type:
+        state: contr_ext_state_type = "continue"
+
+        error_ratio = self._get_error_ratio(error, x_curr, x_pred)
+
+        if (
+            k_curr >= 2
+            and error_ratio >= self.error_ratio
+            and error_ratio
+            > 1.0  # NOTE: last check is to prevent triggering due to numerical precision
+        ):  # Hairer & Wanner divergence monitor a), does not have to be run for explicit schemes
+            state = "divergence"
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous error ratio: {self.error_ratio}"
+                )
+        else:
+            if error_ratio <= 1.0:
+                state = "accepted"
+            elif k_target >= self.table_size:
+                state = "too_slow_convergence"
+            else:
+                state = "continue"
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    msg=f"Evaluated stage {k_curr}, error ratio: {error_ratio}, {state}"
+                )
+        self.error_ratio = error_ratio
+        return state
+
+    @override
+    def get_most_efficient_parameters(
+        self,
+        k_final: int,
+        k_target: int,
+        allow_order_increase: bool,
+    ) -> tuple[int, float]:
+
+        next_step_mult: float
+        if k_final < k_target:
+            next_step_mult = 1.5
+        else:
+            next_step_mult = self.safety_unscaled * 0.6 ** (
+                k_final - k_target
+            )  # NOTE: only valid for Bulirsch sequence
+            # next_step_mult = (
+            #     np.prod(step_seq[: k_final - k_target])
+            #     / np.prod(step_seq[k_target + 1 : k_final + 1])
+            # ) ** (1 / k_target) # TODO: this variant is untested, but should always be exact
+        return k_target, next_step_mult
