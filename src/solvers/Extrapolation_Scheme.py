@@ -357,7 +357,7 @@ class ExtrapolationSolver(ABC):
 
         if h_initial is None:
             step = self.step_controller.get_initial_stepHW(
-                self.ode_fun, x0, t0=t0, p=k_target
+                self.ode_fun, x0, t0=t0, p=k_target * self.order_exponent + 1
             )
         else:
             step = h_initial
@@ -628,7 +628,7 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         delta_t = (t_max - t0) / n_steps
         x_2prev = x0
         x_prev = x0
-        x_n = x0 + delta_t * self.ode_fun(t0, x_prev)  # start with an Euler step
+        x_n = x0 + delta_t * self.ode_fun(t0, x0)  # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
             x_prev = x_n
@@ -804,7 +804,7 @@ class ModMidpointExtrapolationRational(ModMidpointExtrapolation):
             T_finelow = T_extrap
 
             delta_T_h = T_finelow - T_coarselow
-            delta_T_hk = T_finelow - T_coarselowlow
+            delta_T_hk = T_finelow - T_coarselowlow + 1e-12
 
             T_extrap = T_finelow + delta_T_h / (
                 self.coeffs_extrap[k - 1, j] * (1.0 - delta_T_h / delta_T_hk) - 1.0
@@ -925,7 +925,10 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
                     delta_x_1
                     / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
                 )
-                if conv_rate > 1.0:
+                if conv_rate > 1.0:  # TODO: some check if Newton is already converged
+                    print(
+                        f"Divergence\nx0: {x0},x_new: {x_n}, dx: {delta_x}\nNewton error: {self.norm(delta_x)}, residual: {self.norm(delta_t * f_new)}, jacobian error: {self.norm(f_new - (self.ode_fun(t0, x0)+jac0*(x_n - x0)))}"
+                    )
                     return x_n, True
             # delta_x_prev = delta_x
             print(

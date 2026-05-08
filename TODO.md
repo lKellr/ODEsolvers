@@ -2,7 +2,7 @@
 - rewrite in C++
 
 ## Extrapolation
-- rational extrpolation is not working good enough
+- rational extrapolation is not working good enough?
 - Deuflhard control not working at k=1
 
 - find good default values for implicit_rel_costs (will depend on the equation, maybe even provide a function to find it automatically?)
@@ -21,3 +21,4 @@
 
 # Notes
 - AB convergence rate is not better than starter order (Euler or Midpoint)
+- ODEX use order 2*(k+1) for linear problems, 2*k + 1 on nonlinear ones

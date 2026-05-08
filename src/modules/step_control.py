@@ -989,6 +989,7 @@ class StepControllerExtrapBulirsch(StepControllerExtrap):
         super().initialize_scheme(
             is_symmetric, table_size, err_reduction_at_step, total_feval_cost_for_k
         )
+        self.k_min = 3
 
     @override
     def evaluate_step(
@@ -1016,7 +1017,7 @@ class StepControllerExtrapBulirsch(StepControllerExtrap):
                     msg=f"Divergence in step {k_curr}, error ratio: {error_ratio}, previous error ratio: {self.error_ratio}"
                 )
         else:
-            if error_ratio <= 1.0:
+            if error_ratio <= 1.0 and k_curr >= self.k_min:
                 state = "accepted"
             elif k_target >= self.table_size:
                 state = "too_slow_convergence"
@@ -1041,11 +1042,12 @@ class StepControllerExtrapBulirsch(StepControllerExtrap):
         if k_final < k_target:
             next_step_mult = 1.5
         else:
-            next_step_mult = self.safety_unscaled * 0.6 ** (
+            next_step_mult = self.safety_unscaled * 0.75 ** (
                 k_final - k_target
-            )  # NOTE: only valid for Bulirsch sequence
+            )  # NOTE:GBS method uses 0.6 for Bulirsch sequence, but 0.7 might be better and 0.7-0.8 is probably better for all step sequences but Romberg
             # next_step_mult = (
             #     np.prod(step_seq[: k_final - k_target])
             #     / np.prod(step_seq[k_target + 1 : k_final + 1])
-            # ) ** (1 / k_target) # TODO: this variant is untested, but should always be exact
+            # ) ** (1 / k_target) # NOTE: this variant is is the exact version that works for all sequences
+
         return k_target, next_step_mult

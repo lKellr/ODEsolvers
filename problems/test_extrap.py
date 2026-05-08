@@ -117,10 +117,10 @@ results["ODEX_rational"] = solver_odex_rat.solve(x0, t_max)
 
 solver_BGS = ModMidpointExtrapolationRational(
     x_dot,
-    table_size=10,
+    table_size=8,
     step_controller=StepControllerExtrapBulirsch(atol=1e-7, rtol=1e-5),
 )
-results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=7)
+results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=6)
 
 # solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
 # results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)

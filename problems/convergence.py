@@ -85,16 +85,16 @@ conv_data['EULEX5'] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
-    solver_eulex5_rat = EulerExtrapolationRational(
+    solver_odex_rat = ModMidpointExtrapolationRational(
         ode_fun=x_dot,
         table_size=8,
         step_controller=StepControllerExtrapDummy(),
     )
-    time, result, solve_info = solver_eulex5_rat.solve(
+    time, result, solve_info = solver_odex_rat.solve(
         x0, t_max, k_initial=4, h_initial=t_max / n_steps
     )
     errors.append(norm(result[-1] - x_analytic(time[-1])))
-conv_data["EULEX5_rational"] = np.array(errors)
+conv_data["ODEX5_rational"] = np.array(errors)
 
 errors = list()
 for n_steps in N_list:
@@ -121,7 +121,7 @@ for n_steps in N_list:
     errors.append(norm(result[-1] - x_analytic(time[-1])))
 conv_data["EULEX7_longdouble"] = np.array(errors)
 
-# TODO: check ODEX order k
+# NOTE: ODEX schemes converge at higher order than predicted for linear problems
 errors = list()
 for n_steps in N_list:
     solver_odex3 = ModMidpointExtrapolation(
