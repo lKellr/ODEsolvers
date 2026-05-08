@@ -11,12 +11,6 @@ from modules.step_control import (
 from solvers.embedded import *
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
-from solvers.Extrapolation_Scheme_delta import (
-    ModMidpointExtrapolation as ModMidpointExtrapolationDelta,
-)
-from solvers.Extrapolation_Scheme_delta import (
-    EulerExtrapolation as EulerExtrapolationDelta,
-)
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -230,17 +224,7 @@ for n_steps in N_list:
 conv_data["ODEX7_longdouble"] = np.array(errors), np.array(h_mins)
 
 errors = list()
-for n_steps in N_list:
-    solver_odex7del = ModMidpointExtrapolationDelta(
-        ode_fun=x_dot, table_size=8, step_controller=StepControllerExtrapDummy()
-    )
-    time, result, solve_info = solver_odex7del.solve(
-        x0, t_max, k_initial=3, h_initial=t_max / n_steps
-    )
-    errors.append(norm(result[-1] - x_analytic(time[-1])))
-conv_data["ODEX7delta"] = np.array(errors)
-
-errors = list()
+h_mins = list()
 for n_steps in N_list:
     solver_seulex2 = LimplicitEulerExtrapolation(
         ode_fun=x_dot,
