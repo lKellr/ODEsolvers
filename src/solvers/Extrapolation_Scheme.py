@@ -246,7 +246,6 @@ class ExtrapolationSolver(ABC):
             n_lu=0,
             local_error=np.nan,
             local_order=-1,
-            max_substeps=np.nan,
         )
         # calculate initial jacobian, will be reused at the start of each extrapolation step
         jac0 = None
@@ -310,8 +309,7 @@ class ExtrapolationSolver(ABC):
         )  # When a Jacobian is present, i also perform a LU factorization
         step_info["n_jaceval"] = 1 * self.impl_base_scheme
         step_info["local_error"] = error
-        step_info["local_order"] = (k_curr + (not is_diverging)) * self.order_exponent
-        step_info["max_substeps"] = self.substep_seq[k_curr]
+        step_info["local_order"] = k_curr * self.order_exponent + (not is_diverging)
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -423,6 +421,7 @@ class ExtrapolationSolver(ABC):
                     self.step_controller.norm(step_info["local_error"])
                 )
                 solve_info["local_orders"].append(step_info["local_order"])
+                solve_info["h_min"].append(step / self.substep_seq[k_final])
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("Accepted step, continuing.")
             else:

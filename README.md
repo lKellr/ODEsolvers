@@ -11,7 +11,7 @@ It is also possible to specify a dtype, in order to compute in single precision,
 
 For comparison purposes, there are also python implementations of several standard ODE solvers. This includes Runge-Kutta and basic multistep methods.
 Some helper functions for root finding and Jacobian computation are also available.
-All methods return function, Jacobian and LU computation/evaluation frequencies so that their relative performance can be compared.
+All methods return function, Jacobian and LU computation/evaluation frequencies and other information so that their relative performance can be compared.
 
 Some test problems are supplied. Additionally, there are so scripts to evaluate and compare the different methods
 
