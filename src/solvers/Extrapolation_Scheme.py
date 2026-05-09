@@ -901,6 +901,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         tol = self.atol_newton + self.rtol_newton * x0
 
         ddelta_x = np.zeros_like(x0)
+        delta_x_0: NDArray[np.floating]
         t_n = t0
         for n in range(n_steps):
             rhs = delta_t * self.ode_fun(
@@ -913,20 +914,21 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             t_n += delta_t
 
             if n == 0:
-                delta_x_0 = self.norm(ddelta_x / tol)  # store for stability check
+                delta_x_0: NDArray[np.floating] = (
+                    ddelta_x.copy()
+                )  # store for stability check
             elif n == 1:  # stability check
-                delta_x_1: np.floating = self.norm(
-                    lu_solve(
-                        lu_and_piv,
-                        b=rhs
-                        - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
-                        overwrite_b=True,
-                        check_finite=False,
-                    )
-                    / tol
+                delta_x_1: NDArray[np.floating] = lu_solve(
+                    lu_and_piv,
+                    b=rhs - delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                    overwrite_b=True,
+                    check_finite=False,
                 )
-                conv_rate = delta_x_1 / max(
-                    delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                conv_rate = self.norm(delta_x_1 / tol) / max(
+                    self.norm(
+                        delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                        / tol
+                    ),
                     1.0,  # maximum prevents divergence detection if iteration error is already elow tolerance
                 )
                 if conv_rate > 1.0:
