@@ -580,19 +580,33 @@ class StepControllerExtrapKH_Deuflhard(StepControllerExtrapKH):
 
         work_opt = np.inf
         s_opt = np.inf
-        k_opt = 0
+        k_opt = -1
+
+        if k_final < self.k_min:
+            assert (
+                k_final == self.k_min - 1
+            ), "Step exited long before k_min. Estimation of next step parameters is not possible."
+            k_opt = self.k_min
+            s_opt = (
+                self._get_step_mult_opt(
+                    self.error_ratios_k[self.k_min - 2], self.k_min - 1
+                )
+                * self.total_feval_cost_for_k[self.k_min]
+                / self.total_feval_cost_for_k[self.k_min - 1]
+            )
         for k_ in reversed(
             range(self.k_min, k_final + 1)
         ):  # for NR version: range(k_final-1, ...)
             # for H&W version: range(k_target - self.check_window[0], ...)
             s_ = self._get_step_mult_opt(self.error_ratios_k[k_ - 1], k_)
             w_ = (
-                self.total_feval_cost_for_k / s_
+                self.total_feval_cost_for_k[k_] / s_
             )  # NOTE: since the same step length is used with the multiplier, we can calculate the relative work just from the multipliers
 
             if (
                 allow_order_increase and k_ == k_final - 1
             ):  # Interjection by additional check once the two required work/step quantities are available
+                # TODO: does notwork if we require work at k=1, this is not calculated in the loop
                 # TODO: these two variants are not necessary
                 if self.is_greedy:
                     if work_opt < self.work_order_limits[1] * w_:
