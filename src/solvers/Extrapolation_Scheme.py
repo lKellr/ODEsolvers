@@ -844,7 +844,11 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
+
+        # norm and tolerances for divergence detection
         self.norm = self.step_controller.norm
+        self.atol_newton = self.step_controller.atol
+        self.rtol_newton = self.step_controller.rtol
 
         if num_odes is None:
             assert (
@@ -891,6 +895,7 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         lu_and_piv = lu_factor(
             self.mass_matrix - delta_t * jac0, overwrite_a=True, check_finite=False
         )
+        tol = self.atol_newton + self.rtol_newton * x0
 
         x_n = x0.copy()
         t_n = t0
@@ -905,12 +910,8 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
             x_n += delta_x
             t_n += delta_t
 
-            f_new = self.ode_fun(t_n, x_n)
-
             if n == 0:
-                delta_x_0 = self.norm(
-                    delta_x
-                )  # store for stability check # TODO: limit in case delta_x_0 is zero
+                delta_x_0 = self.norm(delta_x / tol)  # store for stability check
             elif n == 1:  # stability check
                 delta_x_1: np.floating = self.norm(
                     lu_solve(
@@ -920,20 +921,14 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
                         overwrite_b=True,
                         check_finite=False,
                     )
+                    / tol
                 )
-                conv_rate = (
-                    delta_x_1
-                    / delta_x_0  # pyright: ignore[reportPossiblyUnboundVariable]
+                conv_rate = delta_x_1 / max(
+                    delta_x_0,  # pyright: ignore[reportPossiblyUnboundVariable]
+                    1.0,  # maximum prevents divergence detection if iteration error is already elow tolerance
                 )
-                if conv_rate > 1.0:  # TODO: some check if Newton is already converged
-                    print(
-                        f"Divergence\nx0: {x0},x_new: {x_n}, dx: {delta_x}\nNewton error: {self.norm(delta_x)}, residual: {self.norm(delta_t * f_new)}, jacobian error: {self.norm(f_new - (self.ode_fun(t0, x0)+jac0*(x_n - x0)))}"
-                    )
+                if conv_rate > 1.0:
                     return x_n, True
-            # delta_x_prev = delta_x
-            print(
-                f"x0: {x0},x_new: {x_n}, dx: {delta_x}\nNewton error: {self.norm(delta_x)}, residual: {self.norm(delta_t * f_new)}, jacobian error: {self.norm(f_new - (self.ode_fun(t0, x0)+jac0*(x_n - x0)))}"
-            )
         return x_n, False
 
 
@@ -971,7 +966,10 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             step_controller=step_controller,
             dtype=dtype,
         )
+        # norm and tolerances for divergence detection
         self.norm = self.step_controller.norm
+        self.atol_newton = self.step_controller.atol
+        self.rtol_newton = self.step_controller.rtol
 
         if num_odes is None:
             assert (
@@ -1015,6 +1013,7 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         lu_and_piv = lu_factor(
             self.mass_matrix - delta_t * jac0, overwrite_a=True, check_finite=False
         )
+        tol = self.atol_newton + self.rtol_newton * x0
 
         # start with a linearized-implicit euler step
         rhs = delta_t * self.ode_fun(
@@ -1037,7 +1036,11 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             t_n += delta_t
 
             if n == 1:  # stability check
-                conv_rate = 0.5 * self.norm(delta_x - delta_x_0) / self.norm(delta_x_0)
+                conv_rate = (
+                    0.5
+                    * self.norm((delta_x - delta_x_0) / tol)
+                    / max(self.norm(delta_x_0 / tol), 1.0)
+                )
                 if conv_rate > 1.0:
                     return x_n, True
 

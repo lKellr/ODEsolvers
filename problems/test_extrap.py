@@ -93,7 +93,7 @@ results["EULEX"] = solver_eulex.solve(x0, t_max)
 # )
 
 # solver_eulex_mass = EulerExtrapolationMass(
-#     x_dot, np.identity(2), x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+#     x_dot, np.identity(2), table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
 # )
 # results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
@@ -145,14 +145,14 @@ results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=6)
 # )
 # results["SODEX"] = solver_sodex.solve(x0, t_max)
 
-# solver_sodex_smoothed = LimplicitMidpointExtrapolation(
-#     x_dot,
-#     table_size=8,
-#     num_odes=x0.size,
-#     step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
-#     use_smoothing=True,
-# )
-# results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
+solver_sodex_smoothed = LimplicitMidpointExtrapolation(
+    x_dot,
+    table_size=8,
+    num_odes=x0.size,
+    step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+    use_smoothing=True,
+)
+results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
 
 # results
 fig, axes = plt.subplots(4, 1, sharex=True, tight_layout=True)
