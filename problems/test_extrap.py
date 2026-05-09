@@ -15,7 +15,6 @@ from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
 
-
 logging.basicConfig(level=logging.INFO)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
@@ -67,30 +66,30 @@ results["EULEX"] = solver_eulex.solve(x0, t_max)
 # )
 # results["EULEX_DE"] = solver_eulex_de.solve(x0, t_max)
 
-# solver_eulex_quad = EulerExtrapolation(
-#     x_dot,
-#     table_size=8,
-#     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-#     dtype=np.longdouble,
-# )
-# results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
+solver_eulex_quad = EulerExtrapolation(
+    x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+    dtype=np.longdouble,
+)
+results["EULEX_quad"] = solver_eulex_quad.solve(x0, t_max)
 
-# solver_eulex_step = EulerExtrapolation(
-#     x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
-# )
-# results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
+solver_eulex_step = EulerExtrapolation(
+    x_dot, table_size=8, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
+)
+results["EULEX_const_step"] = solver_eulex_step.solve(x0, t_max, h_initial=h_average)
 
-# solver_eulex_ord = EulerExtrapolation(
-#     x_dot,
-#     table_size=8,
-#     step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
-# )
-# results["EULEX_const_ord"] = solver_eulex_ord.solve(
-#     x0,
-#     t_max,
-#     k_initial=solver_eulex_ord.table_size - 1,
-#     # h_initial=0.5,
-# )
+solver_eulex_ord = EulerExtrapolation(
+    x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
+)
+results["EULEX_const_ord"] = solver_eulex_ord.solve(
+    x0,
+    t_max,
+    k_initial=solver_eulex_ord.table_size - 1,
+    # h_initial=0.5,
+)
 
 # solver_eulex_mass = EulerExtrapolationMass(
 #     x_dot, np.identity(2), table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
@@ -124,6 +123,7 @@ results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=6)
 
 solver_odex_mass = ModMidpointExtrapolationMass(
     x_dot,
+    mass_matrix=np.eye(2),
     table_size=8,
     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
 )

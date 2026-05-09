@@ -288,6 +288,7 @@ class ExtrapolationSolver(ABC):
 
             # last_table_diag= T_table_k[k_curr-1] # needs to be cached for advanced error computation
             self.fill_extrapolation_table(T_fine_base_order, T_table_k, k_curr)
+            x_pred = x_curr + T_table_k[k_curr]
 
             error = T_table_k[k_curr - 1] - T_table_k[k_curr]  # subdiagonal
             # error_d = np.abs(last_table_diag - T_table_k[k_curr]) # diagonal
@@ -298,7 +299,7 @@ class ExtrapolationSolver(ABC):
 
             # exit conditions
             state = self.step_controller.evaluate_step(
-                error, x_curr, T_table_k[k_curr], k_curr, k_target, allow_early_check
+                error, x_curr, x_pred, k_curr, k_target, allow_early_check
             )
 
         step_info["stop_reason"] = state
@@ -318,7 +319,7 @@ class ExtrapolationSolver(ABC):
             )
 
         return (
-            T_table_k[k_curr],
+            x_curr + T_table_k[k_curr],
             state,
             k_curr,
             step_info,
@@ -356,7 +357,7 @@ class ExtrapolationSolver(ABC):
 
         if h_initial is None:
             step = self.step_controller.get_initial_stepHW(
-                self.ode_fun, x0, t0=t0, p=k_target * self.order_exponent + 1
+                self.ode_fun, x0, t0=t0, p=self.order_exponent - 1.0
             )
         else:
             step = h_initial
@@ -503,13 +504,12 @@ class EulerExtrapolation(ExtrapolationSolver):
         """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
-        x_n = x0.copy()
+        ddelta_x = np.zeros_like(x0)
         t_n = t0
         for _ in range(n_steps):
-            delta_x = delta_t * self.ode_fun(t_n, x_n)
-            x_n += delta_x
+            ddelta_x += delta_t * self.ode_fun(t_n, x0 + ddelta_x)
             t_n += delta_t
-        return x_n, False
+        return ddelta_x, False
 
 
 class EulerExtrapolationMass(ExtrapolationSolver):
@@ -564,19 +564,17 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
-        x_n = x0.copy()
         t_n = t0
+        ddelta_x = np.zeros_like(x0)
         for _ in range(n_steps):
-            delta_x = lu_solve(
+            ddelta_x += lu_solve(
                 self.lu_and_piv_mass,
-                delta_t * self.ode_fun(t_n, x_n),
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x),
                 overwrite_b=True,
                 check_finite=False,
             )
-
-            x_n += delta_x
             t_n += delta_t
-        return x_n, False
+        return ddelta_x, False
 
 
 class ModMidpointExtrapolation(ExtrapolationSolver):
@@ -626,19 +624,24 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
     ) -> tuple[NDArray[np.floating], bool]:
         """modified midpoint method with the posibility of Gragg's smoothing"""
         delta_t = (t_max - t0) / n_steps
-        x_2prev = x0
-        x_prev = x0
-        x_n = x0 + delta_t * self.ode_fun(t0, x0)  # start with an Euler step
+
+        ddelta_x_prev = np.zeros_like(x0)
+        ddelta_x_n = delta_t * self.ode_fun(t0, x0)  # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
-            x_prev = x_n
-            delta_x = 2 * delta_t * self.ode_fun(t_n, x_prev)
-            x_n = x_2prev + delta_x
-            x_2prev = x_prev
+            swaptemp_ddelta_x_n = ddelta_x_n.copy()
+            ddelta_x_n = ddelta_x_prev + 2 * delta_t * self.ode_fun(
+                t_n, x0 + ddelta_x_n
+            )
+            ddelta_x_prev = swaptemp_ddelta_x_n
             t_n += delta_t
         if self.use_smoothing:
-            x_n = 0.5 * (x_n + x_prev + delta_t * self.ode_fun(t_n, x_n))
-        return x_n, False
+            ddelta_x_n = 0.5 * (
+                ddelta_x_n
+                + ddelta_x_prev
+                + delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
+            )
+        return ddelta_x_n, False
 
 
 class ModMidpointExtrapolationMass(ExtrapolationSolver):
@@ -701,38 +704,38 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
     ) -> tuple[NDArray[np.floating], bool]:
         """modified midpoint method with the posibility of Gragg's smoothing"""
         delta_t = (t_max - t0) / n_steps
-        x_2prev = x0
-        x_prev = x0
-        x_n = x0 + lu_solve(
+
+        ddelta_x_prev = np.zeros_like(x0)
+        ddelta_x_n: NDArray[np.floating] = lu_solve(
             self.lu_and_piv_mass,
-            delta_t * self.ode_fun(t0, x_prev),
+            delta_t * self.ode_fun(t0, x0),
             overwrite_b=True,
             check_finite=False,
         )  # start with an Euler step
         t_n = t0 + delta_t
         for _ in range(1, n_steps):
-            x_prev = x_n
-            delta_x = lu_solve(
+            temp_ddelta_x_n = ddelta_x_n
+            ddelta_x_n = ddelta_x_prev + lu_solve(
                 self.lu_and_piv_mass,
-                2 * delta_t * self.ode_fun(t_n, x_n),
+                2 * delta_t * self.ode_fun(t_n, x0 + ddelta_x_n),
                 overwrite_b=True,
                 check_finite=False,
             )
-            x_n = x_2prev + delta_x
-            x_2prev = x_prev
+            ddelta_x_prev = temp_ddelta_x_n
+
             t_n += delta_t
         if self.use_smoothing:
-            x_n = 0.5 * (
-                x_n
-                + x_2prev
+            ddelta_x_n = 0.5 * (
+                ddelta_x_n
+                + ddelta_x_prev
                 + lu_solve(
                     self.lu_and_piv_mass,
-                    delta_t * self.ode_fun(t_n, x_n),
+                    delta_t * self.ode_fun(t_n, x0 + ddelta_x_n),
                     overwrite_b=True,
                     check_finite=False,
                 )
             )
-        return x_n, False
+        return ddelta_x_n, False
 
 
 class ModMidpointExtrapolationRational(ModMidpointExtrapolation):
@@ -897,22 +900,22 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         )
         tol = self.atol_newton + self.rtol_newton * x0
 
-        x_n = x0.copy()
+        ddelta_x = np.zeros_like(x0)
         t_n = t0
         delta_x_0: NDArray[np.floating]
         for n in range(n_steps):
             rhs = delta_t * self.ode_fun(
-                t_n + delta_t, x_n
+                t_n + delta_t, x0 + ddelta_x
             )  # NOTE: t_n + delta_t modification for non-autonomous ODEs
-            delta_x: NDArray[np.floating] = lu_solve(
+            ddelta_x += lu_solve(
                 lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
             )  # NOTE: i can not overwrite b for n==1 because of the convergence check
-            x_n += delta_x
+
             t_n += delta_t
 
             if n == 0:
                 delta_x_0: NDArray[np.floating] = (
-                    delta_x.copy()
+                    ddelta_x.copy()
                 )  # store for stability check
             elif n == 1:  # stability check
                 delta_x_1: NDArray[np.floating] = lu_solve(
@@ -929,8 +932,8 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
                     1.0,  # maximum prevents divergence detection if iteration error is already elow tolerance
                 )
                 if conv_rate > 1.0:
-                    return x_n, True
-        return x_n, False
+                    return ddelta_x, True
+        return ddelta_x, False
 
 
 class LimplicitMidpointExtrapolation(ExtrapolationSolver):
@@ -1020,20 +1023,24 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         rhs = delta_t * self.ode_fun(
             t0, x0
         )  # NOTE: evaluation not at t0 + delta_t, might destroy symmetry?
-        delta_x: NDArray[np.floating] = lu_solve(
+        ddelta_x_n: NDArray[np.floating] = lu_solve(
             lu_and_piv, rhs, overwrite_b=True, check_finite=False
         )
-        delta_x_0: NDArray[np.floating] = delta_x.copy()
-        x_n = x0 + delta_x
-        t_n = t0 + delta_t
+        delta_x = ddelta_x_n.copy()
+        delta_x_0: NDArray[np.floating] = ddelta_x_n.copy()
 
+        t_n = t0 + delta_t
         # continue with linearly implicit midpoint
         for n in range(1, n_steps):
-            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            rhs = 2 * (
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
+                - self.mass_matrix @ delta_x
+            )
             delta_x += lu_solve(
                 lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
             )  # NOTE: i can not overwrite b here because of the convergence check
-            x_n += delta_x
+            ddelta_x_n += delta_x
+
             t_n += delta_t
 
             if n == 1:  # stability check
@@ -1043,15 +1050,18 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
                     / max(self.norm(delta_x_0 / tol), 1.0)
                 )
                 if conv_rate > 1.0:
-                    return x_n, True
+                    return ddelta_x_n, True
 
         if (
             self.use_smoothing
         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            rhs = 2 * (
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
+                - self.mass_matrix @ delta_x
+            )
             solve_final = lu_solve(
                 lu_and_piv, rhs, overwrite_b=True, check_finite=False
-            )  # NOTE: this is not delta_x_final (delta_x_final = delkta_x + solve_final)
-            x_n += 0.5 * solve_final
+            )  # NOTE: this is not delta_x_final (delta_x_final = delta_x + solve_final)
+            ddelta_x_n += 0.5 * solve_final
 
-        return x_n, False
+        return ddelta_x_n, False
