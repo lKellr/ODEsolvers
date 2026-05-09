@@ -15,7 +15,6 @@ from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
 
-
 logging.basicConfig(level=logging.INFO)
 logger_mpb = logging.getLogger("matplotlib")
 logger_mpb.setLevel(logging.INFO)
@@ -92,14 +91,10 @@ results["EULEX_const_ord"] = solver_eulex_ord.solve(
     # h_initial=0.5,
 )
 
-solver_eulex_mass = EulerExtrapolationMass(
-    x_dot,
-    np.identity(2),
-    x_dot,
-    table_size=8,
-    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
-)
-results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
+# solver_eulex_mass = EulerExtrapolationMass(
+#     x_dot, np.identity(2), table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
+# )
+# results["EULEX_mass"] = solver_eulex_mass.solve(x0, t_max)
 
 solver_odex = ModMidpointExtrapolation(
     x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5)
