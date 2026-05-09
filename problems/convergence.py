@@ -22,15 +22,19 @@ logger_pil.setLevel(logging.INFO)
 cmap = plt.get_cmap("tab20")
 
 
-x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = lambda t, x: x*(2. - np.sin(t))
+x_dot: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
+    lambda t, x: x * (2.0 - np.sin(t))
+)
 jac: Callable[[float, NDArray[np.floating]], NDArray[np.floating]] = (
     lambda t, x: 2.0 - np.sin(t)
 )
 
 t_max = 1.0
-x0 = np.array([2.])
+x0 = np.array([2.0])
 
-x_analytic: Callable[[float], NDArray[np.floating]] = lambda t: 2*np.exp(2*t + np.cos(t) - 1.)
+x_analytic: Callable[[float], NDArray[np.floating]] = lambda t: 2 * np.exp(
+    2 * t + np.cos(t) - 1.0
+)
 
 norm = norm_hairer
 
@@ -353,6 +357,25 @@ for i, (scheme_name, (errors, h_min)) in enumerate(conv_data.items()):
         color=cmap(i),
         marker="o",
     )
+    rate = np.log(errors[1:] / errors[:-1]) / np.log(h_min[1:] / h_min[:-1])
+    ax.text(h_min[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
+    ax.text(h_min[0], errors[0], f"$p_0 = {rate[0]:.2f}$")
+
+
+plt.legend(frameon=False)
+plt.tight_layout()
+plt.show()
+
+# plot over minimum h
+fig, ax = plt.subplots(figsize=(9.6, 7.2))
+# ax.set_ylim(-5, 5)
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlabel(r"$h_\mathrm{min}$")
+ax.set_ylabel("error")
+
+for i, (scheme_name, (errors, h_min)) in enumerate(conv_data.items()):
+    ax.plot(h_min, errors, label=scheme_name, color=cmap(i), marker="o")
     rate = np.log(errors[1:] / errors[:-1]) / np.log(h_min[1:] / h_min[:-1])
     ax.text(h_min[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
     ax.text(h_min[0], errors[0], f"$p_0 = {rate[0]:.2f}$")

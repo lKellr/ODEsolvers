@@ -901,8 +901,8 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         tol = self.atol_newton + self.rtol_newton * x0
 
         ddelta_x = np.zeros_like(x0)
-        delta_x_0: NDArray[np.floating]
         t_n = t0
+        delta_x_0: NDArray[np.floating]
         for n in range(n_steps):
             rhs = delta_t * self.ode_fun(
                 t_n + delta_t, x0 + ddelta_x
