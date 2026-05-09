@@ -121,7 +121,11 @@ solver_BGS = ModMidpointExtrapolationRational(
 )
 results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=6)
 
-solver_odex_mass = ModMidpointExtrapolationMass(x_dot, np.identity(2), table_size=8)
+solver_odex_mass = ModMidpointExtrapolationMass(
+    x_dot,
+    table_size=8,
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+)
 results["ODEX_mass"] = solver_odex_mass.solve(x0, t_max)
 
 solver_seulex = LimplicitEulerExtrapolation(
@@ -129,8 +133,8 @@ solver_seulex = LimplicitEulerExtrapolation(
     table_size=8,
     num_odes=x0.size,
     # step_controller=StepControllerExtrapH(atol=1e-7, rtol=1e-5, pre_check_window=0),
-    step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
-    # step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
+    # step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
 )
 results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
@@ -140,7 +144,9 @@ solver_seulex_quad = LimplicitEulerExtrapolation(
 results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
 
 solver_sodex = LimplicitMidpointExtrapolation(
-    x_dot, num_odes=x0.size, step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5)
+    x_dot,
+    num_odes=x0.size,
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
 )
 results["SODEX"] = solver_sodex.solve(x0, t_max)
 
@@ -148,7 +154,7 @@ solver_sodex_smoothed = LimplicitMidpointExtrapolation(
     x_dot,
     table_size=8,
     num_odes=x0.size,
-    step_controller=StepControllerExtrapK(atol=1e-7, rtol=1e-5),
+    step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
     use_smoothing=True,
 )
 results["SODEX_smoothed"] = solver_sodex_smoothed.solve(x0, t_max)
