@@ -319,7 +319,7 @@ class ExtrapolationSolver(ABC):
             )
 
         return (
-            x_pred,
+            x_curr + T_table_k[k_curr],
             state,
             k_curr,
             step_info,
@@ -505,11 +505,9 @@ class EulerExtrapolation(ExtrapolationSolver):
         delta_t = (t_max - t0) / n_steps
 
         ddelta_x = np.zeros_like(x0)
-        x_n = x0
         t_n = t0
         for _ in range(n_steps):
-            ddelta_x += delta_t * self.ode_fun(t_n, x_n)
-            x_n = x0 + ddelta_x
+            ddelta_x += delta_t * self.ode_fun(t_n, x0 + ddelta_x)
             t_n += delta_t
         return ddelta_x, False
 
@@ -566,18 +564,15 @@ class EulerExtrapolationMass(ExtrapolationSolver):
         """Forward Euler scheme"""
         delta_t = (t_max - t0) / n_steps
 
-        x_n = x0
         t_n = t0
         ddelta_x = np.zeros_like(x0)
         for _ in range(n_steps):
             ddelta_x += lu_solve(
                 self.lu_and_piv_mass,
-                delta_t * self.ode_fun(t_n, x_n),
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x),
                 overwrite_b=True,
                 check_finite=False,
             )
-
-            x_n = x0 + ddelta_x
             t_n += delta_t
         return ddelta_x, False
 
@@ -633,17 +628,18 @@ class ModMidpointExtrapolation(ExtrapolationSolver):
         ddelta_x_prev = np.zeros_like(x0)
         ddelta_x_n = delta_t * self.ode_fun(t0, x0)  # start with an Euler step
         t_n = t0 + delta_t
-        x_n = x0 + ddelta_x_n
         for _ in range(1, n_steps):
-            ddelta_x_n = ddelta_x_prev + 2 * delta_t * self.ode_fun(t_n, x_n)
-            ddelta_x_prev = (
-                x_n - x0
-            )  # this is still stored in x_n, so no additioial swapping variable is required
-            x_n = x0 + ddelta_x_n
+            swaptemp_ddelta_x_n = ddelta_x_n.copy()
+            ddelta_x_n = ddelta_x_prev + 2 * delta_t * self.ode_fun(
+                t_n, x0 + ddelta_x_n
+            )
+            ddelta_x_prev = swaptemp_ddelta_x_n
             t_n += delta_t
         if self.use_smoothing:
             ddelta_x_n = 0.5 * (
-                ddelta_x_n + ddelta_x_prev + delta_t * self.ode_fun(t_n, x_n)
+                ddelta_x_n
+                + ddelta_x_prev
+                + delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
             )
         return ddelta_x_n, False
 
@@ -710,25 +706,23 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
         delta_t = (t_max - t0) / n_steps
 
         ddelta_x_prev = np.zeros_like(x0)
-        ddelta_x_n = lu_solve(
+        ddelta_x_n: NDArray[np.floating] = lu_solve(
             self.lu_and_piv_mass,
-            delta_t * self.ode_fun(x0),
+            delta_t * self.ode_fun(t0, x0),
             overwrite_b=True,
             check_finite=False,
         )  # start with an Euler step
         t_n = t0 + delta_t
-        x_n = x0 + ddelta_x_n
         for _ in range(1, n_steps):
+            temp_ddelta_x_n = ddelta_x_n
             ddelta_x_n = ddelta_x_prev + lu_solve(
                 self.lu_and_piv_mass,
-                2 * delta_t * self.ode_fun(t_n, x_n),
+                2 * delta_t * self.ode_fun(t_n, x0 + ddelta_x_n),
                 overwrite_b=True,
                 check_finite=False,
             )
-            ddelta_x_prev = (
-                x_n - x0
-            )  # this is still stored in x_n, so no additioial swapping variable is required
-            x_n = x0 + ddelta_x_n
+            ddelta_x_prev = temp_ddelta_x_n
+
             t_n += delta_t
         if self.use_smoothing:
             ddelta_x_n = 0.5 * (
@@ -736,7 +730,7 @@ class ModMidpointExtrapolationMass(ExtrapolationSolver):
                 + ddelta_x_prev
                 + lu_solve(
                     self.lu_and_piv_mass,
-                    delta_t * self.ode_fun(t_n, x_n),
+                    delta_t * self.ode_fun(t_n, x0 + ddelta_x_n),
                     overwrite_b=True,
                     check_finite=False,
                 )
@@ -902,17 +896,15 @@ class LimplicitEulerExtrapolation(ExtrapolationSolver):
         )
 
         ddelta_x = np.zeros_like(x0)
-        x_n = x0
         t_n = t0
         for n in range(n_steps):
             rhs = delta_t * self.ode_fun(
-                t_n + delta_t, x_n
+                t_n + delta_t, x0 + ddelta_x
             )  # NOTE: t_n + delta_t modification for non-autonomous ODEs
             ddelta_x += lu_solve(
                 lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
             )  # NOTE: i can not overwrite b for n==1 because of the convergence check
 
-            x_n = x0 + ddelta_x
             t_n += delta_t
 
             if n == 0:
@@ -1028,15 +1020,16 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         delta_x_0: NDArray[np.floating] = ddelta_x_n.copy()
 
         t_n = t0 + delta_t
-        x_n = x0 + ddelta_x_n
         # continue with linearly implicit midpoint
         for n in range(1, n_steps):
-            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            rhs = 2 * (
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
+                - self.mass_matrix @ delta_x
+            )
             delta_x += lu_solve(
                 lu_and_piv, rhs, overwrite_b=n != 1, check_finite=False
             )  # NOTE: i can not overwrite b here because of the convergence check
             ddelta_x_n += delta_x
-            x_n = x0 + ddelta_x_n
 
             t_n += delta_t
 
@@ -1048,7 +1041,10 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
         if (
             self.use_smoothing
         ):  # Gragg's smoothing, requires one additional step before which we save the previous value of x
-            rhs = 2 * (delta_t * self.ode_fun(t_n, x_n) - self.mass_matrix @ delta_x)
+            rhs = 2 * (
+                delta_t * self.ode_fun(t_n, x0 + ddelta_x_n)
+                - self.mass_matrix @ delta_x
+            )
             solve_final = lu_solve(
                 lu_and_piv, rhs, overwrite_b=True, check_finite=False
             )  # NOTE: this is not delta_x_final (delta_x_final = delta_x + solve_final)

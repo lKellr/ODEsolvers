@@ -37,7 +37,7 @@ norm = norm_hairer
 N_list = 4 * np.array(
     [
         2 ** (k // 2) if k == 1 or k % 2 == 0 else 1.5 * 2 ** (k // 2)
-        for k in range(1, 10)
+        for k in range(1, 8)
     ]
 )
 k_list = np.array(range(5))
@@ -49,7 +49,7 @@ for n_steps in N_list:
     time, result, solve_info = AB3(x_dot, x0, t_max, h=t_max / n_steps)
     errors.append(norm(result[-1] - x_analytic(time[-1])))
     h_mins.append(t_max / n_steps)
-conv_data["AB_3"] = np.array(errors), np.array(h_mins)
+conv_data["AB3"] = np.array(errors), np.array(h_mins)
 
 errors = list()
 h_mins = list()
@@ -319,7 +319,14 @@ ax.set_xlabel("H")
 ax.set_ylabel("error")
 
 for i, (scheme_name, (errors, _)) in enumerate(conv_data.items()):
-    ax.plot(t_max/N_list, errors, label=scheme_name, color=cmap(i), marker='o')
+    ax.plot(
+        t_max / N_list,
+        errors,
+        label=scheme_name,
+        color=cmap(i),
+        marker="o",
+        linestyle="--" if scheme_name in ["AB3", "RK4"] else "-",
+    )
     rate = np.log(errors[1:]/errors[:-1])/np.log(N_list[:-1]/N_list[1:])
     ax.text(t_max / N_list[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
     ax.text(t_max / N_list[0], errors[0], f"$p_0 = {rate[0]:.2f}$")
@@ -327,7 +334,7 @@ for i, (scheme_name, (errors, _)) in enumerate(conv_data.items()):
 
 plt.legend(frameon=False)
 plt.tight_layout()
-# plt.savefig("convergence.png")
+plt.savefig("convergence.png")
 plt.show()
 
 # plot over minimum h
@@ -339,7 +346,13 @@ ax.set_xlabel(r"$h_\mathrm{min}$")
 ax.set_ylabel("error")
 
 for i, (scheme_name, (errors, h_min)) in enumerate(conv_data.items()):
-    ax.plot(h_min, errors, label=scheme_name, color=cmap(i), marker="o")
+    ax.plot(
+        h_min,
+        errors,
+        label=scheme_name,
+        color=cmap(i),
+        marker="o",
+    )
     rate = np.log(errors[1:] / errors[:-1]) / np.log(h_min[1:] / h_min[:-1])
     ax.text(h_min[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
     ax.text(h_min[0], errors[0], f"$p_0 = {rate[0]:.2f}$")
