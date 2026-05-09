@@ -57,14 +57,14 @@ solver_eulex = EulerExtrapolation(
 )
 results["EULEX"] = solver_eulex.solve(x0, t_max)
 
-solver_eulex_de = EulerExtrapolation(
-    x_dot,
-    table_size=8,
-    step_controller=StepControllerExtrapKH_Deuflhard(
-        atol=1e-7, rtol=1e-5, is_greedy=False
-    ),
-)
-results["EULEX_DE"] = solver_eulex_de.solve(x0, t_max)
+# solver_eulex_de = EulerExtrapolation(
+#     x_dot,
+#     table_size=8,
+#     step_controller=StepControllerExtrapKH_Deuflhard(
+#         atol=1e-7, rtol=1e-5, is_greedy=False
+#     ),
+# )
+# results["EULEX_DE"] = solver_eulex_de.solve(x0, t_max)
 
 solver_eulex_quad = EulerExtrapolation(
     x_dot,
@@ -123,6 +123,7 @@ results["BGS"] = solver_BGS.solve(x0, t_max, k_initial=6)
 
 solver_odex_mass = ModMidpointExtrapolationMass(
     x_dot,
+    mass_matrix=np.eye(2),
     table_size=8,
     step_controller=StepControllerExtrapKH(atol=1e-7, rtol=1e-5),
 )
@@ -138,10 +139,10 @@ solver_seulex = LimplicitEulerExtrapolation(
 )
 results["SEULEX"] = solver_seulex.solve(x0, t_max)
 
-solver_seulex_quad = LimplicitEulerExtrapolation(
-    x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble
-)
-results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
+# solver_seulex_quad = LimplicitEulerExtrapolation(
+#     x_dot, table_size=20, num_odes=x0.size, dtype=np.longdouble
+# )
+# results["SEULEX_quad"] = solver_seulex_quad.solve(x0, t_max)
 
 solver_sodex = LimplicitMidpointExtrapolation(
     x_dot,
