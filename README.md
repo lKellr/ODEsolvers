@@ -38,3 +38,31 @@ This improvement has been implemented in ExtraPylate.
 For more information:
 Fukushima, T. (1996). "Reduction of round-off errors in the extrapolation methods and its application to the integration of Orbital Motion." The Astronomical Journal, 112, 1298. https://doi.org/10.1086/118100 
 
+# Performance on N-body problem
+_N-Body case simulated until T=100 yrs, tolerance settings atol=1e-8, rtol=1e-5 (Note that RK schemes use error per step, extrapolation schemes use error per unit step)_
+These implementations are not built for performance. Still, ODEX can be competitive with the standard Dormand-Princee solver at low tolerances. However then, one should really use DOP853, which is much faster than both
+
+
+|    | time (s) | steps | f evals | 
+| ---|---|---|---|
+| EULEX | 3.3 |4980 | 118710 |
+| ODEX | 0.8 | 1906 | 57892 |
+| ODEX (low tolerance) | 1.3 | 1933 | 107912 |
+| DP54 | 0.9 | 6739| 47041|
+| DP54 (SciPy) | 0.8 | 6651| 49340 |
+| DOP853 (SciPy) | 0.5 | 2409| 30686|
+
+|   | time |
+|---|---|
+|EULEX | 22.0 |
+|ODEX | 8.7 |
+|ODEX (low tolerance) | 16.9 |
+|DP54 | 7.7 |
+|DP54 (SciPy) | 8.0 |
+|DOP853 (SciPy) | 4.7 |
+_without Numba jit, steps and number of function evalations are the same as above_
+
+without jitting, the function evaluation for the n-body problem is so expensive (it can't be vectorized) that it dominates the solution process. Solution times are therefore directly proportional to the number of function evaluations.
+
+![energy conservation](energy_conservation.png)
+_In the same case, ODEX (which is slightly faster than DP54) has much better energy conservation properties_

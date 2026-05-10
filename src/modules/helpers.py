@@ -2,10 +2,19 @@ from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root
+from numba import jit, float64
 
 norm_hairer: Callable[[NDArray[np.floating]], np.floating] = lambda x: np.sqrt(
     np.sum(x**2) / x.size
 )
+
+
+@jit(float64(float64[:]))
+def norm_hairer_jit(x: np.floating) -> np.floating:
+    """jitted function, as norm is a bottleneck, limited to double precision"""
+
+    return np.sqrt(np.sum(x**2) / x.size)
+
 
 clip: Callable[[float, float, float], float] = lambda x, x_min, x_max: min(
     max(x, x_min), x_max
