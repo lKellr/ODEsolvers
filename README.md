@@ -39,7 +39,7 @@ For more information:
 Fukushima, T. (1996). "Reduction of round-off errors in the extrapolation methods and its application to the integration of Orbital Motion." The Astronomical Journal, 112, 1298. https://doi.org/10.1086/118100 
 
 # Performance on N-body problem
-_N-Body case simulated until T=100 yrs, tolerance settings atol=1e-8, rtol=1e-5 (Note that RK schemes use error per step, extrapolation schemes use error per unit step)_
+_N-Body case simulated until T=100 yrs, tolerance settings atol=1e-8, rtol=1e-5_
 These implementations are not built for performance. Still, ODEX can be competitive with the standard Dormand-Princee solver at low tolerances. However then, one should really use DOP853, which is much faster than both
 
 
