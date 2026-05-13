@@ -7,7 +7,7 @@ from solvers.embedded import DP54
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
 import logging
-from numba import njit
+from numba import jit, float64
 from time import perf_counter
 import cProfile
 
@@ -28,7 +28,7 @@ n = masses.size
 dim = 2
 
 
-@njit
+@jit(float64[:](float64, float64[:]))
 def x_dot(t, x):
     velocities = x[n * dim :] / masses2
 
@@ -232,7 +232,7 @@ for i, (scheme_name, (time, result, solve_info)) in enumerate(results.items()):
     )
 plt.legend(frameon=False)
 plt.tight_layout()
-plt.savefig("energy_conservation.png")
+# plt.savefig("energy_conservation.png")
 plt.show()
 
 # orbits

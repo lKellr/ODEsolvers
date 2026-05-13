@@ -66,3 +66,42 @@ without jitting, the function evaluation for the n-body problem is so expensive 
 
 ![energy conservation](energy_conservation.png)
 _In the same case, ODEX (which is slightly faster than DP54) has much better energy conservation properties_
+
+# Performance on Stiff Problems
+
+## Zhabotinsky-Belousov reaction / Oregonator
+$$
+\begin{align}
+\begin{split}
+  \dot{x}_0 &= s (x_1 - x_1 x_0 - q x_0) \\
+  \dot{x}_1  &= 1 / s (-x_1 - x_1 x_0 + f x_2)\\
+  \dot{x}_2 &=w (x_0 - x_2) \\
+\end{split}
+\end{align}
+$$
+with $s = 7.27$, $q=8.375 \cdot 10^{-6}$, $f=1$, and $w=0.161$.
+
+All three solution components can be plotted:
+
+![BZ](BZ.png)
+
+or just the phase space behavior of the first two components
+
+![BZ_phasespace](BZ_phasespace.png)
+
+|    | time (s) | steps | f evals | 
+| ---|---|---|---|
+|SEULEX |  0.21 | 155 | 4340 |
+|SODEX | 0.14 | 81 | 2986 |
+| SciPy BDF | 0.13 | 722 | 2198 |
+| SciPy Radau | 0.16 | 449 | 4371 |
+
+Both in the plots and in the results, the high order capability of the extrapolation schemes is apparent: the steps taken are about 5-10 times larger than those of the other schemes. While, the solution  the output points is just as accurate as with the other schemes, the plots look bad due to the linear interpolation between points which are wide apart.SO unless one is only interested in the solution at $t_\mathrm{max}$, the extrapolation schemes would require dense outpout by way of an interpolation polynomial which is genrated during the solution procedure. This is currently not implemented.
+
+## Brusselator
+|    | time (s) | steps | f evals | 
+| ---|---|---|---|
+|SEULEX | 0.20 | 444 | 10593 |
+|SODEX | 0.08  | 129 | 5614 |
+| SciPy BDF | 0.18 | 1614 | 4722 |
+| SciPy Radau | 0.13  | 1026 | 8566 |

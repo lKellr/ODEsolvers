@@ -41,7 +41,7 @@ def x_dot(t, x):
     return np.hstack((velocities, forces))
 
 
-t_max = 100.0
+t_max = 10.0
 # TODO: use astropy ephemerides, currently i am starting with all planets in phase (on the x-axis), these orbits are unstable
 initial_positions = np.array(
     [
@@ -73,6 +73,9 @@ x0 = np.hstack([initial_positions.flatten(), masses2 * initial_velocities.flatte
 
 assert x0.size == (2 * n * dim), f"Wrong shape {x0.shape} of initial condition"
 
+# jit-compile
+print(f"x'_0 = {x_dot(0.0, x0)}")
+
 # EULEX
 prof_tim_start = perf_counter()
 solver_eulex = EulerExtrapolation(
@@ -83,13 +86,14 @@ time, result, solve_info = solver_eulex.solve(x0, t_max)
 prof_elapsed = perf_counter() - prof_tim_start
 print(f"solution took {prof_elapsed:.3f} s for EULEX")
 
-# # DP54
-# prof_tim_start = perf_counter()
-# time, result, solve_info = DP54(
-#     x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-5, rtol=1e-3
-# )
-# prof_elapsed = perf_counter() - prof_tim_start
-# print(f"solution took {prof_elapsed:.3f} s for DP54")
+
+# DP54
+prof_tim_start = perf_counter()
+time, result, solve_info = DP54(
+    x_dot, x0, t_max, h_limits=(1e-16, np.inf), atol=1e-6, rtol=1e-4
+)
+prof_elapsed = perf_counter() - prof_tim_start
+print(f"solution took {prof_elapsed:.3f} s for DP54")
 
 fig, ax = plt.subplots(figsize=(16, 6), layout="tight")
 fig.set_tight_layout(True)
