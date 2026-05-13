@@ -85,7 +85,7 @@ with cProfile.Profile() as pr:
 
 prof_elapsed = perf_counter() - prof_tim_start
 print(
-    f"solution took {prof_elapsed:.3f} s for SEULEX, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}"
+    f"solution took {prof_elapsed:.3f} s for SEULEX, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}, jac evals: {solve_info['n_jaceval']}, LU decompositions: {solve_info['n_lu']}"
 )
 results["SEULEX"] = time, result, solve_info
 
@@ -105,7 +105,7 @@ with cProfile.Profile() as pr:
 
 prof_elapsed = perf_counter() - prof_tim_start
 print(
-    f"solution took {prof_elapsed:.3f} s for SODEX, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}"
+    f"solution took {prof_elapsed:.3f} s for SODEX, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}, jac evals: {solve_info['n_jaceval']}, LU decompositions: {solve_info['n_lu']}"
 )
 
 results["SODEX"] = time, result, solve_info
@@ -121,7 +121,7 @@ results["SODEX"] = time, result, solve_info
 
 # prof_elapsed = perf_counter() - prof_tim_start
 # print(
-#     f"solution took {prof_elapsed:.3f} s for BDF3, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}"
+#     f"solution took {prof_elapsed:.3f} s for BDF3, {time.size} steps, {solve_info['n_feval']} function evals, dt_ave {t_max/time.size}, jac evals: {solve_info['n_jaceval']}, LU decompositions: {solve_info['n_lu']}"
 # )
 
 # results["BDF3"] = time, result, solve_info
@@ -131,7 +131,7 @@ prof_tim_start = perf_counter()
 sol = solve_ivp(x_dot, (0.0, t_max), x0, "BDF", atol=1e-8, rtol=1e-5, jac=jac)
 prof_elapsed = perf_counter() - prof_tim_start
 print(
-    f"solution took {prof_elapsed:.3f} s for scipy BDF, {sol.t.size} steps, {sol.nfev} function evals, dt_ave {t_max/sol.t.size}"
+    f"solution took {prof_elapsed:.3f} s for scipy BDF, {sol.t.size} steps, {sol.nfev} function evals, dt_ave {t_max/sol.t.size}, jac evals: {sol.njev}, LU decompositions: {sol.nlu}"
 )
 results["SP_BDF"] = (
     sol.t,
@@ -150,7 +150,7 @@ prof_tim_start: float = perf_counter()
 sol = solve_ivp(x_dot, (0.0, t_max), x0, "Radau", atol=1e-8, rtol=1e-5, jac=jac)
 prof_elapsed = perf_counter() - prof_tim_start
 print(
-    f"solution took {prof_elapsed:.3f} s for scipy Radau, {sol.t.size} steps, {sol.nfev} function evals, dt_ave {t_max/sol.t.size}"
+    f"solution took {prof_elapsed:.3f} s for scipy Radau, {sol.t.size} steps, {sol.nfev} function evals, dt_ave {t_max/sol.t.size}, jac evals: {sol.njev}, LU decompositions: {sol.nlu}"
 )
 results["SP_Radau"] = (
     sol.t,

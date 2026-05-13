@@ -67,9 +67,7 @@ without jitting, the function evaluation for the n-body problem is so expensive 
 ![energy conservation](energy_conservation.png)
 _In the same case, ODEX (which is slightly faster than DP54) has much better energy conservation properties_
 
-# Performance on Stiff Problems
-
-## Zhabotinsky-Belousov reaction / Oregonator
+# Zhabotinsky-Belousov reaction / Oregonator
 $$
 \begin{align}
 \begin{split}
@@ -89,19 +87,12 @@ or just the phase space behavior of the first two components
 
 ![BZ_phasespace](BZ_phasespace.png)
 
-|    | time (s) | steps | f evals | 
-| ---|---|---|---|
-|SEULEX |  0.21 | 155 | 4340 |
-|SODEX | 0.14 | 81 | 2986 |
-| SciPy BDF | 0.13 | 722 | 2198 |
-| SciPy Radau | 0.16 | 449 | 4371 |
+|    | time (s) | steps | f evals | Jacobian evals | LU decompositions |
+| ---|---|---|---|---|---|
+|SEULEX |  0.24 | 155 | 4340 | 182 | 978 |
+|SODEX | 0.14 | 81 | 2986 | 98 | 359 |
+| SciPy BDF | 0.15 | 722 | 2198 | 87 | 202 |
+| SciPy Radau | 0.20 | 449 | 4371 | 180 | 522 |
+_Note that the times are not really representative. Even for comparison purposes, the simulations are a bit too short. Also, the systems that are LU-decomposed are different for the different schemes_
 
-Both in the plots and in the results, the high order capability of the extrapolation schemes is apparent: the steps taken are about 5-10 times larger than those of the other schemes. While, the solution  the output points is just as accurate as with the other schemes, the plots look bad due to the linear interpolation between points which are wide apart.SO unless one is only interested in the solution at $t_\mathrm{max}$, the extrapolation schemes would require dense outpout by way of an interpolation polynomial which is genrated during the solution procedure. This is currently not implemented.
-
-## Brusselator
-|    | time (s) | steps | f evals | 
-| ---|---|---|---|
-|SEULEX | 0.20 | 444 | 10593 |
-|SODEX | 0.08  | 129 | 5614 |
-| SciPy BDF | 0.18 | 1614 | 4722 |
-| SciPy Radau | 0.13  | 1026 | 8566 |
+Both in the plots and in the results, the high order capability of the extrapolation schemes is apparent: the steps taken are about 5-10 times larger than those of the other schemes. While, the solution the output points is just as accurate as with the other schemes, the plots look bad due to the linear interpolation between points which are wide apart. So unless one is only interested in the solution at $t_\mathrm{max}$, the extrapolation schemes would require dense outpout by way of an interpolation polynomial which is generated during the solution procedure. This is currently not implemented.
