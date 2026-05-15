@@ -349,7 +349,7 @@ class StepControllerExtrap(StepController, ABC):
         return k_target, next_step_mult
 
 
-class StepControllerExtrapKH(StepControllerExtrap):
+class StepControllerExtrapKH_HW(StepControllerExtrap):
     """Combined order and step size (k-h) controller for extrapolation methods. Following the strategy layed out in Hairer&Wanner and modified in Numerical Recipes. Originally proposed by Deulfhard"""
 
     def __init__(

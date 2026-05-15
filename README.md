@@ -1,4 +1,4 @@
-# ODE solvers
+# ExtraPylate
 This project provides a very extensible implementation of extrapolation schemes for time integration.
 
 Explicit and implicit methods with variants for implicit ODEs, many different step sequences, rational and polynomial extrapolation, different step controllers are all available.
@@ -27,6 +27,8 @@ Some test problems are supplied. Additionally, there are so scripts to evaluate 
 
 ## Convergence of high order schemes and round-off errors 
 ![convergence](convergence_delta.png)
+_Note that the semingly too-igh convergence rate of ODEX5_rational comes from a different step sequence, which refines more quickly than the harmonic one used with the other schemes. When plotted over the subdivided step size $\frac{H}{n_i}$, the convergence rate is as expected_
+
 At high orders, round-offs in the extrapolation become apparent. The convergence rate plateaus and lower errors can not be reached. One remedy is to use a more accurate floating point representation. With numpy, this can be np.longdouble instead of np.double. This type is more accurante, but it can be 96 bit or 128 bit depending on the platform.
 Also, numpy is not really made to use higher precision numbers. It is difficult to make sure numpy really uses longdouble in all operations and does not quitely cast the arrays to double.
 
@@ -38,7 +40,7 @@ This improvement has been implemented in ExtraPylate.
 For more information:
 Fukushima, T. (1996). "Reduction of round-off errors in the extrapolation methods and its application to the integration of Orbital Motion." The Astronomical Journal, 112, 1298. https://doi.org/10.1086/118100 
 
-# Performance on N-body problem
+# Performance on the N-body problem
 _N-Body case simulated until T=100 yrs, tolerance settings atol=1e-8, rtol=1e-5_
 These implementations are not built for performance. Still, ODEX can be competitive with the standard Dormand-Princee solver at low tolerances. However then, one should really use DOP853, which is much faster than both
 

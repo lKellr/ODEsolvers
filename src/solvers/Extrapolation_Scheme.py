@@ -17,7 +17,7 @@ from modules.helpers import numerical_jacobian_t
 
 from modules.step_control import (
     StepControllerExtrap,
-    StepControllerExtrapKH,
+    StepControllerExtrapKH_HW,
     contr_ext_state_type,
 )
 
@@ -142,7 +142,7 @@ class ExtrapolationSolver(ABC):
         self.impl_base_scheme = False
 
         if step_controller is None:
-            step_controller = StepControllerExtrapKH(
+            step_controller = StepControllerExtrapKH_HW(
                 dtype=dtype,
             )
         self.step_controller = step_controller
@@ -167,7 +167,10 @@ class ExtrapolationSolver(ABC):
         self.impl_base_scheme = require_jacobian
         if jac_fun is None and self.impl_base_scheme:
             self.jac_fun = lambda t, x: numerical_jacobian_t(
-                t, x, self.ode_fun, delta=1e-12
+                t,
+                x,
+                self.ode_fun,
+                delta=1e-8,  # TODO: the delta value might need tuning, for BZ values smaller than 1e-4 are inaccurate
             )
             if implicit_rel_costs is None:
                 self.implicit_rel_costs = ImplicitRelCosts(rel_jac_cost=num_odes + 1)
@@ -1062,6 +1065,8 @@ class LimplicitMidpointExtrapolation(ExtrapolationSolver):
             solve_final = lu_solve(
                 lu_and_piv, rhs, overwrite_b=True, check_finite=False
             )  # NOTE: this is not delta_x_final (delta_x_final = delta_x + solve_final)
-            ddelta_x_n += 0.5 * solve_final
+            ddelta_x_n += (
+                0.5 * solve_final
+            )  # TODO: SHampine performs a consistency check here by checking norm(0.5 * solve_final) < 0.75
 
         return ddelta_x_n, False
