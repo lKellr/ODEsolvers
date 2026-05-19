@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from modules.post_processing import find_local_errors
-from modules.step_control import ControllerPIParams, StepControllerExtrapKH
+from modules.step_control import ControllerPIParams, StepControllerExtrapKH_HW
 from solvers.embedded import *
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import EulerExtrapolation, ModMidpointExtrapolation
@@ -72,12 +72,12 @@ results["RKX4_3"] = RKX4(
 results["RK4"] = RK4(x_dot, x0, t_max, 0.67 * t_max / len(results["DP54"][0]))
 
 solver_eulex = EulerExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH_HW(atol=1e-5, rtol=1e-3)
 )
 results["EULEX"] = solver_eulex.solve(x0, t_max)
 
 solver_odex = ModMidpointExtrapolation(
-    x_dot, table_size=8, step_controller=StepControllerExtrapKH(atol=1e-5, rtol=1e-3)
+    x_dot, table_size=8, step_controller=StepControllerExtrapKH_HW(atol=1e-5, rtol=1e-3)
 )
 results["ODEX"] = solver_odex.solve(x0, t_max)
 
