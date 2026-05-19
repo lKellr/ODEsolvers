@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 from scipy.differentiate import jacobian
 from scipy.integrate import solve_ivp
 from modules.helpers import norm_hairer_jit
-from modules.step_control import ControllerPIParams, StepControllerExtrapKH
+from modules.step_control import ControllerPIParams, StepControllerExtrapKH_HW
 from solvers.embedded import DP54
 from solvers.implicit import *
 from solvers.Extrapolation_Scheme import *
@@ -76,7 +76,9 @@ solver_seulex = LimplicitEulerExtrapolation(
     table_size=12,
     jac_fun=jac,
     num_odes=x0.size,
-    step_controller=StepControllerExtrapKH(atol=1e-8, rtol=1e-5, norm=norm_hairer_jit),
+    step_controller=StepControllerExtrapKH_HW(
+        atol=1e-8, rtol=1e-5, norm=norm_hairer_jit
+    ),
 )
 with cProfile.Profile() as pr:
     time, result, solve_info = solver_seulex.solve(x0, t_max)
@@ -96,7 +98,9 @@ solver_sodex = LimplicitMidpointExtrapolation(
     table_size=12,
     jac_fun=jac,
     num_odes=x0.size,
-    step_controller=StepControllerExtrapKH(atol=1e-8, rtol=1e-5, norm=norm_hairer_jit),
+    step_controller=StepControllerExtrapKH_HW(
+        atol=1e-8, rtol=1e-5, norm=norm_hairer_jit
+    ),
 )
 with cProfile.Profile() as pr:
     time, result, solve_info = solver_sodex.solve(x0, t_max)

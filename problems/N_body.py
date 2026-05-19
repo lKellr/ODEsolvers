@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
-from modules.step_control import StepControllerExtrapKH
+from modules.step_control import StepControllerExtrapKH_HW
 from solvers.embedded import DP54
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
@@ -79,7 +79,9 @@ print(f"x'_0 = {x_dot(0.0, x0)}")
 # EULEX
 prof_tim_start = perf_counter()
 solver_eulex = EulerExtrapolation(
-    x_dot, table_size=12, step_controller=StepControllerExtrapKH(atol=1e-6, rtol=1e-4)
+    x_dot,
+    table_size=12,
+    step_controller=StepControllerExtrapKH_HW(atol=1e-6, rtol=1e-4),
 )
 time, result, solve_info = solver_eulex.solve(x0, t_max)
 

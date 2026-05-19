@@ -63,7 +63,7 @@ def get_run_kwargs(type, t_max, target_err):
     if type == 'controlledRK':
         run_kwargs = dict(atol=, rtol=1.0)
     if type == 'ExtrapKH':
-        step_controller=StepControllerExtrapKH(atol=, rtol=)
+        step_controller=StepControllerExtrapKH_HW(atol=, rtol=)
         run_kwargs = dict(h_initial=, k_initial=)
     elif type == 'ExtrapK':
         step_controller=StepControllerExtrapK(atol=, rtol=)

@@ -6,7 +6,7 @@ from modules.step_control import (
     StepControllerExtrapDummy,
     StepControllerExtrapK,
     StepControllerExtrapH,
-    StepControllerExtrapKH,
+    StepControllerExtrapKH_HW,
 )
 from solvers.embedded import *
 from solvers.explicit import *
@@ -115,6 +115,7 @@ for n_steps in N_list:
         ode_fun=x_dot,
         table_size=8,
         step_controller=StepControllerExtrapDummy(),
+        # substep_seq="harmonic",
     )
     time, result, solve_info = solver_odex_rat.solve(
         x0, t_max, k_initial=4, h_initial=t_max / n_steps
@@ -357,25 +358,6 @@ for i, (scheme_name, (errors, h_min)) in enumerate(conv_data.items()):
         color=cmap(i),
         marker="o",
     )
-    rate = np.log(errors[1:] / errors[:-1]) / np.log(h_min[1:] / h_min[:-1])
-    ax.text(h_min[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
-    ax.text(h_min[0], errors[0], f"$p_0 = {rate[0]:.2f}$")
-
-
-plt.legend(frameon=False)
-plt.tight_layout()
-plt.show()
-
-# plot over minimum h
-fig, ax = plt.subplots(figsize=(9.6, 7.2))
-# ax.set_ylim(-5, 5)
-ax.set_xscale("log")
-ax.set_yscale("log")
-ax.set_xlabel(r"$h_\mathrm{min}$")
-ax.set_ylabel("error")
-
-for i, (scheme_name, (errors, h_min)) in enumerate(conv_data.items()):
-    ax.plot(h_min, errors, label=scheme_name, color=cmap(i), marker="o")
     rate = np.log(errors[1:] / errors[:-1]) / np.log(h_min[1:] / h_min[:-1])
     ax.text(h_min[-1], errors[-1], rf"$\bar{{p}} = {np.mean(rate):.2f}$")
     ax.text(h_min[0], errors[0], f"$p_0 = {rate[0]:.2f}$")
