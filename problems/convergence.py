@@ -1,13 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from modules.step_control import (
-    ControllerPIParams,
-    StepControllerExtrapDummy,
-    StepControllerExtrapK,
-    StepControllerExtrapH,
-    StepControllerExtrapKH_HW,
-)
+from modules.step_control import StepControllerExtrapDummy
 from solvers.embedded import *
 from solvers.explicit import *
 from solvers.Extrapolation_Scheme import *
@@ -44,7 +38,6 @@ N_list = 4 * np.array(
         for k in range(1, 8)
     ]
 )
-k_list = np.array(range(5))
 conv_data = dict()
 
 errors = list()

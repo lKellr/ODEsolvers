@@ -9,7 +9,9 @@ from modules.helpers import norm_hairer, numerical_jacobian
 logger = logging.getLogger(__name__)
 
 
-def Secant_method(f: Callable[[float], float], a: float, b: float, tol: float) -> float:
+def Secant_method(
+    f: Callable[[float], float], a: float, b: float, tol_iter: float
+) -> float:
     """searches for a root of the function f in the interval [a, b]"""
     x0 = a  # starting value 1
     x1 = b  # starting value 2
@@ -19,7 +21,7 @@ def Secant_method(f: Callable[[float], float], a: float, b: float, tol: float) -
     dx = -f1 / (f1 - f0) * (x1 - x0)
     x1 = x1 + dx
 
-    while abs(f1) > tol:
+    while abs(f1) > tol_iter:
         f0 = f1
         f1 = f(x1)
         dx = -f1 / (f1 - f0) * dx
@@ -28,7 +30,9 @@ def Secant_method(f: Callable[[float], float], a: float, b: float, tol: float) -
     return x1
 
 
-def Bisection(f: Callable[[float], float], a: float, b: float, tol: float) -> float:
+def Bisection(
+    f: Callable[[float], float], a: float, b: float, tol_iter: float
+) -> float:
     """searches for a root of the function f in the interval [a, b]"""
     x0 = a
     x1 = b
@@ -36,18 +40,18 @@ def Bisection(f: Callable[[float], float], a: float, b: float, tol: float) -> fl
     f0 = f(x0)
     f1 = f(x1)
 
-    if np.sign(f0) == np.sign(f1):
-        print("invalid starting values")
-        return np.nan
+    assert np.sign(f0) != np.sign(f1), "invalid starting values"
 
     xm = 0.5 * (x0 + x1)
 
-    while abs(f1) > tol:
+    while abs(xm - x1) > tol_iter:
         fm = f(xm)
         if np.sign(fm) == np.sign(f0):
             f0 = fm
+            x0 = xm
         else:
             f1 = fm
+            x1 = xm
         xm = 0.5 * (x0 + x1)
 
     return xm
